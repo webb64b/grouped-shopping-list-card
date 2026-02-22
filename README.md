@@ -2,7 +2,8 @@
 
 A custom Lovelace card for Home Assistant that groups shopping list items by category using `[CATEGORY]` bracket prefixes with emoji headers. Includes built-in AI categorization and an optional automation package for full sorting features.
 
-![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1+-blue)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5?logo=homeassistantcommunitystore)](https://github.com/hacs/integration)
+![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.1+-blue)
 
 ## Features
 
@@ -45,13 +46,14 @@ Uncategorized items (without a `[CATEGORY]` prefix) appear at the top under a se
 
 ## Installation
 
-### Step 1: Install the Card
+### HACS (Recommended)
 
-1. Copy `grouped-shopping-list-card.js` to your `config/www/` directory
-2. Add the resource in **Settings > Dashboards > Resources**:
-   - URL: `/local/grouped-shopping-list-card.js?v=1`
-   - Type: JavaScript Module
-3. Add the card to a dashboard:
+1. Open **HACS** in Home Assistant
+2. Click the three-dot menu (top right) and select **Custom repositories**
+3. Paste `https://github.com/webb64b/grouped-shopping-list-card` and select **Dashboard** as the category
+4. Click **Add**, then find **Grouped Shopping List Card** in the HACS store and install it
+5. Restart Home Assistant
+6. Add the card to a dashboard:
 
 ```yaml
 type: custom:grouped-shopping-list-card
@@ -59,7 +61,15 @@ entity: todo.shopping_list
 title: Shopping List
 ```
 
-This gives you the grouped display, manual item management, and the built-in categorization features (local lookup + AI categorize button).
+### Manual
+
+1. Copy `grouped-shopping-list-card.js` to your `config/www/` directory
+2. Add the resource in **Settings > Dashboards > Resources**:
+   - URL: `/local/grouped-shopping-list-card.js?v=1`
+   - Type: JavaScript Module
+3. Add the card to a dashboard (same YAML as above)
+
+Either method gives you the grouped display, manual item management, and the built-in categorization features (local lookup + AI categorize button).
 
 ### Step 2: Install the Automation Package (optional)
 
