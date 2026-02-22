@@ -1,6 +1,6 @@
 # Grouped Shopping List Card
 
-A custom Lovelace card for Home Assistant that groups shopping list items by category using `[CATEGORY]` bracket prefixes with emoji headers. Includes built-in AI categorization and an optional automation package for full sorting features.
+A custom Lovelace card for Home Assistant that automatically organizes your shopping list into categorized sections with emoji headers. Includes built-in AI categorization and an optional automation package for hands-free sorting.
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5?logo=homeassistantcommunitystore)](https://github.com/hacs/integration)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.1+-blue)
@@ -12,19 +12,18 @@ A custom Lovelace card for Home Assistant that groups shopping list items by cat
 ## Features
 
 ### Core (card only, no extra config needed)
-- Groups items by `[CATEGORY]` prefix (e.g., `[PRODUCE] Lettuce`)
-- Emoji headers for each category (11 built-in categories)
+- Automatically groups items under emoji category headers (11 built-in categories)
 - Add, check/uncheck, and delete items inline
 - Collapsible completed items section with "clear all" button
 - Built-in lookup table (~400 common grocery items) for instant categorization
-- AI-powered categorization for unknown items via `ai_task.generate_data`
-- "Categorize All" button on the Uncategorized section header
+- AI-powered categorization for unknown items via Home Assistant's `ai_task` service
+- "Categorize All" button for bulk categorization
 - Configurable category display order
-- DOM diffing for smooth updates (no full re-renders)
+- Smooth updates with DOM diffing (no full re-renders)
 - iOS keyboard fix — input stays focused during state updates
 - Works with any `todo` entity
 
-### Full Features (with automation package)
+### With Automation Package (optional)
 - **Sort button** — full-list AI re-sort from the card header
 - **Auto-categorize toggle** — automatically categorize new items as they're added
 - **Daily auto-sort** — catches any uncategorized items added via voice, app, etc.
@@ -46,7 +45,7 @@ A custom Lovelace card for Home Assistant that groups shopping list items by cat
 | HOUSEHOLD  | 🏠    |
 | OTHER      | 📦    |
 
-Uncategorized items (without a `[CATEGORY]` prefix) appear at the top under a separate section.
+Uncategorized items appear at the top under a separate section until they are categorized.
 
 ## Installation
 
@@ -138,11 +137,13 @@ category_order:
 
 The card uses a two-tier approach:
 
-1. **Local lookup (instant, free):** ~400 common grocery items are matched against a built-in dictionary. "milk" instantly becomes `[DAIRY] Milk` with zero API calls.
+1. **Local lookup (instant, free):** ~400 common grocery items are matched against a built-in dictionary. Adding "milk" instantly places it under the Dairy section with zero API calls.
 
-2. **AI fallback:** Items not found in the dictionary are sent to `ai_task.generate_data` for categorization. This requires an AI integration but handles any item.
+2. **AI fallback:** Items not found in the dictionary are sent to Home Assistant's `ai_task` service for categorization. This requires an AI integration (OpenAI, Google AI, or Anthropic) but handles any item.
 
-The in-card categorization (both single-item and batch) uses **non-destructive in-place renames** — items are never deleted and re-added.
+Categorization is non-destructive — items are renamed in place and never deleted or re-added.
+
+> **How it works under the hood:** The card stores categories as a `[CATEGORY]` prefix on each item (e.g., `[DAIRY] Milk`). These prefixes are hidden in the card UI — you just see clean item names grouped under their category headers. If you view items in the default HA shopping list or companion app, you'll see the prefixes.
 
 ## What the Package Adds
 
@@ -152,7 +153,7 @@ The `shopping_list_sorter.yaml` package provides:
 |-----------|-------------|
 | `input_button.sort_shopping_list_button` | Triggers a full-list AI re-sort when pressed |
 | `input_boolean.auto_sort_shopping_list` | When ON, new items are auto-categorized on add |
-| `automation.sort_shopping_list_button` | Clears the list and re-adds all items in sorted `[CATEGORY]` order |
+| `automation.sort_shopping_list_button` | Clears the list and re-adds all items in sorted category order |
 | `automation.sort_shopping_list_daily` | At 9 AM, checks for uncategorized items and sorts if found |
 | `script.add_items_to_shopping_list` | Add multiple comma-separated items via one service call |
 | `script.sort_shopping_list_alphabetical` | Simple alphabetical sort (no AI) |
