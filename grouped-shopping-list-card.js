@@ -27,6 +27,237 @@ const CATEGORY_ORDER = [
 const UNCATEGORIZED_EMOJI = '📝';
 const UNCATEGORIZED_LABEL = 'UNCATEGORIZED';
 
+/**
+ * Common grocery items → category lookup. Checked before calling AI.
+ * Keys are lowercase. Supports both singular and plural forms.
+ */
+const COMMON_ITEMS = {
+  // PRODUCE
+  'apple': 'PRODUCE', 'apples': 'PRODUCE', 'avocado': 'PRODUCE', 'avocados': 'PRODUCE',
+  'banana': 'PRODUCE', 'bananas': 'PRODUCE', 'basil': 'PRODUCE', 'bell pepper': 'PRODUCE',
+  'bell peppers': 'PRODUCE', 'blueberries': 'PRODUCE', 'broccoli': 'PRODUCE',
+  'cabbage': 'PRODUCE', 'carrots': 'PRODUCE', 'carrot': 'PRODUCE', 'celery': 'PRODUCE',
+  'cherries': 'PRODUCE', 'cilantro': 'PRODUCE', 'corn': 'PRODUCE', 'cucumber': 'PRODUCE',
+  'cucumbers': 'PRODUCE', 'garlic': 'PRODUCE', 'ginger': 'PRODUCE', 'grapes': 'PRODUCE',
+  'green beans': 'PRODUCE', 'green onions': 'PRODUCE', 'herbs': 'PRODUCE',
+  'jalapeno': 'PRODUCE', 'jalapenos': 'PRODUCE', 'kale': 'PRODUCE', 'lemons': 'PRODUCE',
+  'lemon': 'PRODUCE', 'lettuce': 'PRODUCE', 'limes': 'PRODUCE', 'lime': 'PRODUCE',
+  'mango': 'PRODUCE', 'mangoes': 'PRODUCE', 'melon': 'PRODUCE', 'mint': 'PRODUCE',
+  'mushrooms': 'PRODUCE', 'mushroom': 'PRODUCE', 'onion': 'PRODUCE', 'onions': 'PRODUCE',
+  'orange': 'PRODUCE', 'oranges': 'PRODUCE', 'parsley': 'PRODUCE', 'peaches': 'PRODUCE',
+  'pears': 'PRODUCE', 'peas': 'PRODUCE', 'peppers': 'PRODUCE', 'pineapple': 'PRODUCE',
+  'potatoes': 'PRODUCE', 'potato': 'PRODUCE', 'raspberries': 'PRODUCE',
+  'romaine': 'PRODUCE', 'rosemary': 'PRODUCE', 'salad': 'PRODUCE', 'salad mix': 'PRODUCE',
+  'scallions': 'PRODUCE', 'shallots': 'PRODUCE', 'spinach': 'PRODUCE',
+  'squash': 'PRODUCE', 'strawberries': 'PRODUCE', 'sweet potato': 'PRODUCE',
+  'sweet potatoes': 'PRODUCE', 'thyme': 'PRODUCE', 'tomato': 'PRODUCE',
+  'tomatoes': 'PRODUCE', 'watermelon': 'PRODUCE', 'zucchini': 'PRODUCE',
+  'arugula': 'PRODUCE', 'asparagus': 'PRODUCE', 'beets': 'PRODUCE',
+  'brussels sprouts': 'PRODUCE', 'cauliflower': 'PRODUCE', 'clementines': 'PRODUCE',
+  'coleslaw': 'PRODUCE', 'coleslaw mix': 'PRODUCE', 'dill': 'PRODUCE',
+  'edamame': 'PRODUCE', 'eggplant': 'PRODUCE', 'fennel': 'PRODUCE', 'figs': 'PRODUCE',
+  'fruit': 'PRODUCE', 'green pepper': 'PRODUCE', 'honeydew': 'PRODUCE',
+  'jicama': 'PRODUCE', 'kiwi': 'PRODUCE', 'leeks': 'PRODUCE', 'nectarines': 'PRODUCE',
+  'okra': 'PRODUCE', 'papaya': 'PRODUCE', 'parsnips': 'PRODUCE', 'plums': 'PRODUCE',
+  'pomegranate': 'PRODUCE', 'radishes': 'PRODUCE', 'red onion': 'PRODUCE',
+  'red pepper': 'PRODUCE', 'rhubarb': 'PRODUCE', 'shallot': 'PRODUCE',
+  'snap peas': 'PRODUCE', 'snow peas': 'PRODUCE', 'sprouts': 'PRODUCE',
+  'tangerines': 'PRODUCE', 'turnips': 'PRODUCE', 'yams': 'PRODUCE',
+  'shredded lettuce': 'PRODUCE', 'baby spinach': 'PRODUCE', 'mixed greens': 'PRODUCE',
+
+  // MEAT
+  'bacon': 'MEAT', 'beef': 'MEAT', 'brisket': 'MEAT', 'chicken': 'MEAT',
+  'chicken breast': 'MEAT', 'chicken breasts': 'MEAT', 'chicken thighs': 'MEAT',
+  'chicken wings': 'MEAT', 'deli meat': 'MEAT', 'ground beef': 'MEAT',
+  'ground turkey': 'MEAT', 'ham': 'MEAT', 'hot dogs': 'MEAT', 'lamb': 'MEAT',
+  'meatballs': 'MEAT', 'pork': 'MEAT', 'pork chops': 'MEAT', 'ribs': 'MEAT',
+  'roast': 'MEAT', 'salmon': 'MEAT', 'sausage': 'MEAT', 'sausages': 'MEAT',
+  'shrimp': 'MEAT', 'steak': 'MEAT', 'steaks': 'MEAT', 'tilapia': 'MEAT',
+  'tuna': 'MEAT', 'turkey': 'MEAT', 'crab': 'MEAT', 'fish': 'MEAT',
+  'lobster': 'MEAT', 'pepperoni': 'MEAT', 'prosciutto': 'MEAT', 'salami': 'MEAT',
+  'scallops': 'MEAT', 'cod': 'MEAT', 'catfish': 'MEAT', 'anchovies': 'MEAT',
+  'chorizo': 'MEAT', 'corned beef': 'MEAT', 'filet': 'MEAT', 'flank steak': 'MEAT',
+  'ground chicken': 'MEAT', 'ground pork': 'MEAT', 'jerky': 'MEAT',
+  'lunch meat': 'MEAT', 'pork loin': 'MEAT', 'pork tenderloin': 'MEAT',
+  'pulled pork': 'MEAT', 'rib eye': 'MEAT', 'ribeye': 'MEAT', 'roast beef': 'MEAT',
+  'sirloin': 'MEAT', 'tri tip': 'MEAT', 'wings': 'MEAT',
+
+  // DAIRY
+  'butter': 'DAIRY', 'cheddar': 'DAIRY', 'cheese': 'DAIRY', 'colby jack': 'DAIRY',
+  'cottage cheese': 'DAIRY', 'cream': 'DAIRY', 'cream cheese': 'DAIRY',
+  'eggs': 'DAIRY', 'egg': 'DAIRY', 'feta': 'DAIRY', 'goat cheese': 'DAIRY',
+  'greek yogurt': 'DAIRY', 'half and half': 'DAIRY', 'heavy cream': 'DAIRY',
+  'milk': 'DAIRY', 'mozzarella': 'DAIRY', 'parmesan': 'DAIRY',
+  'provolone': 'DAIRY', 'ricotta': 'DAIRY', 'shredded cheese': 'DAIRY',
+  'sliced cheese': 'DAIRY', 'sour cream': 'DAIRY', 'swiss cheese': 'DAIRY',
+  'whipped cream': 'DAIRY', 'whipping cream': 'DAIRY', 'yogurt': 'DAIRY',
+  'american cheese': 'DAIRY', 'brie': 'DAIRY', 'buttermilk': 'DAIRY',
+  'coffee creamer': 'DAIRY', 'creamer': 'DAIRY', 'eggnog': 'DAIRY',
+  'gouda': 'DAIRY', 'gruyere': 'DAIRY', 'jack cheese': 'DAIRY',
+  'monterey jack': 'DAIRY', 'oat milk': 'DAIRY', 'almond milk': 'DAIRY',
+  'pepper jack': 'DAIRY', 'string cheese': 'DAIRY', 'velveeta': 'DAIRY',
+
+  // FROZEN
+  'frozen berries': 'FROZEN', 'frozen fruit': 'FROZEN', 'frozen meals': 'FROZEN',
+  'frozen peas': 'FROZEN', 'frozen pizza': 'FROZEN', 'frozen vegetables': 'FROZEN',
+  'frozen veggies': 'FROZEN', 'frozen waffles': 'FROZEN', 'ice cream': 'FROZEN',
+  'popsicles': 'FROZEN', 'tater tots': 'FROZEN', 'frozen chicken': 'FROZEN',
+  'frozen fries': 'FROZEN', 'french fries': 'FROZEN', 'corn dogs': 'FROZEN',
+  'frozen burritos': 'FROZEN', 'frozen shrimp': 'FROZEN', 'ice pops': 'FROZEN',
+  'lean cuisine': 'FROZEN', 'pizza rolls': 'FROZEN', 'pot pies': 'FROZEN',
+  'tv dinners': 'FROZEN', 'waffles': 'FROZEN', 'frozen dinner': 'FROZEN',
+  'frozen dinners': 'FROZEN', 'frozen fish': 'FROZEN', 'ice': 'FROZEN',
+  'sorbet': 'FROZEN', 'gelato': 'FROZEN',
+
+  // BAKERY
+  'bagels': 'BAKERY', 'baguette': 'BAKERY', 'bread': 'BAKERY', 'buns': 'BAKERY',
+  'cake': 'BAKERY', 'cinnamon rolls': 'BAKERY', 'croissants': 'BAKERY',
+  'donuts': 'BAKERY', 'doughnuts': 'BAKERY', 'english muffins': 'BAKERY',
+  'hamburger buns': 'BAKERY', 'hot dog buns': 'BAKERY', 'muffins': 'BAKERY',
+  'naan': 'BAKERY', 'pie': 'BAKERY', 'pita': 'BAKERY', 'pita bread': 'BAKERY',
+  'rolls': 'BAKERY', 'sourdough': 'BAKERY', 'tortillas': 'BAKERY',
+  'wheat bread': 'BAKERY', 'white bread': 'BAKERY', 'wraps': 'BAKERY',
+  'cornbread': 'BAKERY', 'crescent rolls': 'BAKERY', 'dinner rolls': 'BAKERY',
+  'flatbread': 'BAKERY', 'flour tortillas': 'BAKERY', 'focaccia': 'BAKERY',
+  'french bread': 'BAKERY', 'garlic bread': 'BAKERY', 'hoagie rolls': 'BAKERY',
+  'kaiser rolls': 'BAKERY', 'pancake mix': 'BAKERY', 'rye bread': 'BAKERY',
+  'sub rolls': 'BAKERY', 'texas toast': 'BAKERY', 'corn tortillas': 'BAKERY',
+
+  // PANTRY
+  'baking powder': 'PANTRY', 'baking soda': 'PANTRY', 'bbq sauce': 'PANTRY',
+  'beans': 'PANTRY', 'black beans': 'PANTRY', 'bouillon': 'PANTRY',
+  'bread crumbs': 'PANTRY', 'broth': 'PANTRY', 'brown sugar': 'PANTRY',
+  'canned corn': 'PANTRY', 'canned tomatoes': 'PANTRY', 'cereal': 'PANTRY',
+  'chicken broth': 'PANTRY', 'coconut milk': 'PANTRY', 'cooking spray': 'PANTRY',
+  'cornstarch': 'PANTRY', 'dressing': 'PANTRY', 'flour': 'PANTRY',
+  'honey': 'PANTRY', 'hot sauce': 'PANTRY', 'jam': 'PANTRY', 'jelly': 'PANTRY',
+  'ketchup': 'PANTRY', 'mac and cheese': 'PANTRY', 'maple syrup': 'PANTRY',
+  'marinara': 'PANTRY', 'mayonnaise': 'PANTRY', 'mayo': 'PANTRY', 'mustard': 'PANTRY',
+  'oatmeal': 'PANTRY', 'oats': 'PANTRY', 'olive oil': 'PANTRY', 'oil': 'PANTRY',
+  'pasta': 'PANTRY', 'pasta sauce': 'PANTRY', 'peanut butter': 'PANTRY',
+  'pepper': 'PANTRY', 'pickles': 'PANTRY', 'ranch': 'PANTRY',
+  'ranch dressing': 'PANTRY', 'red pepper flakes': 'PANTRY', 'rice': 'PANTRY',
+  'salad dressing': 'PANTRY', 'salsa': 'PANTRY', 'salt': 'PANTRY',
+  'soy sauce': 'PANTRY', 'spaghetti': 'PANTRY', 'spaghetti sauce': 'PANTRY',
+  'spices': 'PANTRY', 'sugar': 'PANTRY', 'tomato paste': 'PANTRY',
+  'tomato sauce': 'PANTRY', 'vanilla': 'PANTRY', 'vanilla extract': 'PANTRY',
+  'vegetable oil': 'PANTRY', 'vinegar': 'PANTRY', 'worcestershire': 'PANTRY',
+  'alfredo sauce': 'PANTRY', 'almond butter': 'PANTRY', 'apple cider vinegar': 'PANTRY',
+  'balsamic': 'PANTRY', 'balsamic vinegar': 'PANTRY', 'brownie mix': 'PANTRY',
+  'cake mix': 'PANTRY', 'canola oil': 'PANTRY', 'capers': 'PANTRY',
+  'chicken stock': 'PANTRY', 'chili powder': 'PANTRY', 'cinnamon': 'PANTRY',
+  'cocoa': 'PANTRY', 'coconut oil': 'PANTRY', 'condensed milk': 'PANTRY',
+  'corn syrup': 'PANTRY', 'couscous': 'PANTRY', 'croutons': 'PANTRY',
+  'cumin': 'PANTRY', 'curry paste': 'PANTRY', 'dijon mustard': 'PANTRY',
+  'elbow macaroni': 'PANTRY', 'evaporated milk': 'PANTRY', 'garlic powder': 'PANTRY',
+  'gelatin': 'PANTRY', 'gravy': 'PANTRY', 'hoisin sauce': 'PANTRY',
+  'italian seasoning': 'PANTRY', 'lentils': 'PANTRY', 'molasses': 'PANTRY',
+  'noodles': 'PANTRY', 'nutmeg': 'PANTRY', 'olives': 'PANTRY',
+  'onion powder': 'PANTRY', 'oregano': 'PANTRY', 'oyster sauce': 'PANTRY',
+  'panko': 'PANTRY', 'paprika': 'PANTRY', 'penne': 'PANTRY',
+  'powdered sugar': 'PANTRY', 'quinoa': 'PANTRY', 'ramen': 'PANTRY',
+  'refried beans': 'PANTRY', 'relish': 'PANTRY', 'sesame oil': 'PANTRY',
+  'sriracha': 'PANTRY', 'steak sauce': 'PANTRY', 'stuffing': 'PANTRY',
+  'taco seasoning': 'PANTRY', 'taco shells': 'PANTRY', 'tahini': 'PANTRY',
+  'teriyaki sauce': 'PANTRY', 'turmeric': 'PANTRY', 'yeast': 'PANTRY',
+  'pinto beans': 'PANTRY', 'kidney beans': 'PANTRY', 'chickpeas': 'PANTRY',
+  'canned tuna': 'PANTRY', 'canned chicken': 'PANTRY', 'soup': 'PANTRY',
+  'raisins': 'PANTRY', 'dried fruit': 'PANTRY', 'breadcrumbs': 'PANTRY',
+
+  // BEVERAGES
+  'beer': 'BEVERAGES', 'coffee': 'BEVERAGES', 'energy drinks': 'BEVERAGES',
+  'gatorade': 'BEVERAGES', 'juice': 'BEVERAGES', 'kombucha': 'BEVERAGES',
+  'lemonade': 'BEVERAGES', 'orange juice': 'BEVERAGES', 'seltzer': 'BEVERAGES',
+  'soda': 'BEVERAGES', 'sparkling water': 'BEVERAGES', 'tea': 'BEVERAGES',
+  'water': 'BEVERAGES', 'wine': 'BEVERAGES', 'apple juice': 'BEVERAGES',
+  'champagne': 'BEVERAGES', 'cider': 'BEVERAGES', 'coconut water': 'BEVERAGES',
+  'coke': 'BEVERAGES', 'cold brew': 'BEVERAGES', 'cranberry juice': 'BEVERAGES',
+  'diet coke': 'BEVERAGES', 'dr pepper': 'BEVERAGES', 'espresso': 'BEVERAGES',
+  'grape juice': 'BEVERAGES', 'green tea': 'BEVERAGES', 'iced tea': 'BEVERAGES',
+  'la croix': 'BEVERAGES', 'lacroix': 'BEVERAGES', 'margarita mix': 'BEVERAGES',
+  'mountain dew': 'BEVERAGES', 'pepsi': 'BEVERAGES', 'prosecco': 'BEVERAGES',
+  'red bull': 'BEVERAGES', 'sprite': 'BEVERAGES', 'tonic water': 'BEVERAGES',
+  'vodka': 'BEVERAGES', 'whiskey': 'BEVERAGES', 'tequila': 'BEVERAGES',
+  'rum': 'BEVERAGES', 'gin': 'BEVERAGES', 'bourbon': 'BEVERAGES',
+
+  // SNACKS
+  'almonds': 'SNACKS', 'cashews': 'SNACKS', 'cheese crackers': 'SNACKS',
+  'cheez its': 'SNACKS', 'chips': 'SNACKS', 'chocolate': 'SNACKS',
+  'cookies': 'SNACKS', 'crackers': 'SNACKS', 'dark chocolate': 'SNACKS',
+  'doritos': 'SNACKS', 'dried mango': 'SNACKS', 'fruit snacks': 'SNACKS',
+  'goldfish': 'SNACKS', 'granola': 'SNACKS', 'granola bars': 'SNACKS',
+  'gummy bears': 'SNACKS', 'hummus': 'SNACKS', 'mixed nuts': 'SNACKS',
+  'nuts': 'SNACKS', 'peanuts': 'SNACKS', 'pecans': 'SNACKS', 'pistachios': 'SNACKS',
+  'popcorn': 'SNACKS', 'potato chips': 'SNACKS', 'pretzels': 'SNACKS',
+  'protein bars': 'SNACKS', 'rice cakes': 'SNACKS', 'salted nuts': 'SNACKS',
+  'seeds': 'SNACKS', 'snack bars': 'SNACKS', 'tortilla chips': 'SNACKS',
+  'trail mix': 'SNACKS', 'walnuts': 'SNACKS', 'candy': 'SNACKS',
+  'beef jerky': 'SNACKS', 'brownie': 'SNACKS', 'brownies': 'SNACKS',
+  'cheetos': 'SNACKS', 'chex mix': 'SNACKS', 'fritos': 'SNACKS',
+  'gummies': 'SNACKS', 'lays': 'SNACKS', 'm&ms': 'SNACKS',
+  'oreos': 'SNACKS', 'pringles': 'SNACKS', 'ritz': 'SNACKS',
+  'snickers': 'SNACKS', 'sunflower seeds': 'SNACKS', 'tostitos': 'SNACKS',
+
+  // HEALTH
+  'advil': 'HEALTH', 'allergy medicine': 'HEALTH', 'aspirin': 'HEALTH',
+  'band aids': 'HEALTH', 'bandages': 'HEALTH', 'body wash': 'HEALTH',
+  'conditioner': 'HEALTH', 'contact solution': 'HEALTH', 'cotton balls': 'HEALTH',
+  'cough drops': 'HEALTH', 'cough syrup': 'HEALTH', 'dayquil': 'HEALTH',
+  'deodorant': 'HEALTH', 'face wash': 'HEALTH', 'first aid': 'HEALTH',
+  'floss': 'HEALTH', 'ibuprofen': 'HEALTH', 'lip balm': 'HEALTH',
+  'lotion': 'HEALTH', 'medicine': 'HEALTH', 'melatonin': 'HEALTH',
+  'mouthwash': 'HEALTH', 'multivitamin': 'HEALTH', 'nyquil': 'HEALTH',
+  'pain reliever': 'HEALTH', 'q tips': 'HEALTH', 'razors': 'HEALTH',
+  'shampoo': 'HEALTH', 'shaving cream': 'HEALTH', 'soap': 'HEALTH',
+  'sunscreen': 'HEALTH', 'tampons': 'HEALTH', 'tissues': 'HEALTH',
+  'toothbrush': 'HEALTH', 'toothpaste': 'HEALTH', 'tylenol': 'HEALTH',
+  'tums': 'HEALTH', 'vitamins': 'HEALTH', 'pepto bismol': 'HEALTH',
+  'benadryl': 'HEALTH', 'chapstick': 'HEALTH', 'eye drops': 'HEALTH',
+  'hand sanitizer': 'HEALTH', 'hydrogen peroxide': 'HEALTH',
+  'neosporin': 'HEALTH', 'rubbing alcohol': 'HEALTH', 'thermometer': 'HEALTH',
+
+  // HOUSEHOLD
+  'aluminum foil': 'HOUSEHOLD', 'batteries': 'HOUSEHOLD', 'bleach': 'HOUSEHOLD',
+  'broom': 'HOUSEHOLD', 'candles': 'HOUSEHOLD', 'cleaning spray': 'HOUSEHOLD',
+  'clorox': 'HOUSEHOLD', 'clorox wipes': 'HOUSEHOLD', 'dish soap': 'HOUSEHOLD',
+  'dishwasher pods': 'HOUSEHOLD', 'dryer sheets': 'HOUSEHOLD',
+  'fabric softener': 'HOUSEHOLD', 'garbage bags': 'HOUSEHOLD',
+  'glad bags': 'HOUSEHOLD', 'hand soap': 'HOUSEHOLD', 'kitchen towels': 'HOUSEHOLD',
+  'laundry detergent': 'HOUSEHOLD', 'light bulbs': 'HOUSEHOLD',
+  'lysol': 'HOUSEHOLD', 'napkins': 'HOUSEHOLD', 'paper plates': 'HOUSEHOLD',
+  'paper towels': 'HOUSEHOLD', 'parchment paper': 'HOUSEHOLD',
+  'plastic bags': 'HOUSEHOLD', 'plastic cups': 'HOUSEHOLD',
+  'plastic wrap': 'HOUSEHOLD', 'sandwich bags': 'HOUSEHOLD',
+  'saran wrap': 'HOUSEHOLD', 'sponges': 'HOUSEHOLD', 'sponge': 'HOUSEHOLD',
+  'straw': 'HOUSEHOLD', 'straws': 'HOUSEHOLD', 'toilet paper': 'HOUSEHOLD',
+  'tp': 'HOUSEHOLD', 'trash bags': 'HOUSEHOLD', 'windex': 'HOUSEHOLD',
+  'wipes': 'HOUSEHOLD', 'ziploc bags': 'HOUSEHOLD', 'ziplock bags': 'HOUSEHOLD',
+  'air freshener': 'HOUSEHOLD', 'baking sheet': 'HOUSEHOLD',
+  'clothespins': 'HOUSEHOLD', 'detergent': 'HOUSEHOLD',
+  'dishwasher detergent': 'HOUSEHOLD', 'duster': 'HOUSEHOLD',
+  'freezer bags': 'HOUSEHOLD', 'gloves': 'HOUSEHOLD', 'lint roller': 'HOUSEHOLD',
+  'mop': 'HOUSEHOLD', 'oven cleaner': 'HOUSEHOLD', 'pine sol': 'HOUSEHOLD',
+  'pledge': 'HOUSEHOLD', 'steel wool': 'HOUSEHOLD', 'tide': 'HOUSEHOLD',
+  'tide pods': 'HOUSEHOLD', 'tin foil': 'HOUSEHOLD',
+
+  // OTHER
+  'cat food': 'OTHER', 'cat litter': 'OTHER', 'dog food': 'OTHER',
+  'dog treats': 'OTHER', 'pet food': 'OTHER', 'charcoal': 'OTHER',
+  'diapers': 'OTHER', 'baby food': 'OTHER', 'baby wipes': 'OTHER',
+  'formula': 'OTHER', 'flowers': 'OTHER', 'gift card': 'OTHER',
+  'greeting card': 'OTHER', 'ice pack': 'OTHER', 'lighter': 'OTHER',
+  'matches': 'OTHER', 'newspaper': 'OTHER', 'stamps': 'OTHER',
+};
+
+/** Look up an item name in the common items table. Returns category or null. */
+function lookupCategory(name) {
+  const key = name.toLowerCase().trim();
+  if (COMMON_ITEMS[key]) return COMMON_ITEMS[key];
+  // Try without trailing 's' for simple plurals
+  if (key.endsWith('s') && COMMON_ITEMS[key.slice(0, -1)]) return COMMON_ITEMS[key.slice(0, -1)];
+  return null;
+}
+
 function parseItem(summary) {
   const match = summary.match(/^\[([A-Z]+)\]\s*(.*)$/);
   if (match) {
@@ -49,6 +280,9 @@ class GroupedShoppingListCard extends HTMLElement {
     this._initialFetchDone = false;
     this._inputFocused = false;
     this._pendingRender = false;
+    this._sortBtn = null;
+    this._autoSortBtn = null;
+    this._isSorting = false;
     // Persistent DOM references
     this._countBadge = null;
     this._addInput = null;
@@ -67,10 +301,22 @@ class GroupedShoppingListCard extends HTMLElement {
     if (!config.entity) {
       throw new Error('Please define an entity (e.g. todo.shopping_list)');
     }
-    this._config = { title: 'Shopping List', ...config };
+    this._config = {
+      title: 'Shopping List',
+      sort_button_entity: 'input_button.sort_shopping_list_button',
+      auto_sort_entity: 'input_boolean.auto_sort_shopping_list',
+      category_order: [...CATEGORY_ORDER],
+      ...config,
+    };
     // Rebuild shell if config changes (e.g. title)
     this._shellBuilt = false;
     this._initialFetchDone = false;
+  }
+
+  _getCategoryOrder() {
+    const order = this._config.category_order;
+    if (Array.isArray(order) && order.length > 0) return order;
+    return CATEGORY_ORDER;
   }
 
   set hass(hass) {
@@ -92,6 +338,17 @@ class GroupedShoppingListCard extends HTMLElement {
     if (newState !== this._lastEntityState) {
       this._lastEntityState = newState;
       this._debouncedFetch();
+    }
+
+    // Track auto-sort toggle state
+    const autoSortEntity = this._config.auto_sort_entity;
+    if (autoSortEntity && hass.states[autoSortEntity]) {
+      const aState = hass.states[autoSortEntity].state;
+      if (this._autoSortBtn && this._autoSortBtn._lastState !== aState) {
+        this._autoSortBtn._lastState = aState;
+        this._autoSortBtn.classList.toggle('active', aState === 'on');
+        this._autoSortBtn.title = aState === 'on' ? 'Auto-categorize: ON' : 'Auto-categorize: OFF';
+      }
     }
   }
 
@@ -116,11 +373,173 @@ class GroupedShoppingListCard extends HTMLElement {
 
   async _addItem(name) {
     if (!name.trim()) return;
+    const trimmed = name.trim();
     try {
-      await this._hass.callService('todo', 'add_item', { item: name.trim() }, { entity_id: this._config.entity });
+      await this._hass.callService('todo', 'add_item', { item: trimmed },
+        { entity_id: this._config.entity });
       this._debouncedFetch();
     } catch (e) {
       console.error('grouped-shopping-list-card: Failed to add item', e);
+      return;
+    }
+
+    // If auto-sort is ON and item isn't already categorized, categorize in background
+    if (!parseItem(trimmed).category) {
+      const autoSortEntity = this._config.auto_sort_entity;
+      const isAutoSort = this._hass.states[autoSortEntity]?.state === 'on';
+      if (isAutoSort) {
+        this._categorizeInBackground(trimmed);
+      }
+    }
+  }
+
+  async _categorizeInBackground(itemName) {
+    const addRow = this._addInput?.parentElement;
+
+    // Try local lookup first — instant, no AI call needed
+    const localCat = lookupCategory(itemName);
+    if (localCat) {
+      const properName = itemName.trim().replace(/^\w/, c => c.toUpperCase());
+      const categorized = `[${localCat}] ${properName}`;
+      try {
+        await this._fetchItems();
+        const target = this._items.find(i =>
+          i.status !== 'completed' && i.summary.toLowerCase() === itemName.toLowerCase());
+        if (target) {
+          await this._hass.callService('todo', 'update_item',
+            { item: target.uid, rename: categorized },
+            { entity_id: this._config.entity });
+          this._debouncedFetch();
+        }
+      } catch (e) {
+        console.error('grouped-shopping-list-card: Local categorize failed', e);
+      }
+      return;
+    }
+
+    // Fall through to AI for unknown items
+    addRow?.classList.add('categorizing');
+    try {
+      const response = await this._hass.callWS({
+        type: 'call_service',
+        domain: 'ai_task',
+        service: 'generate_data',
+        service_data: {
+          task_name: 'categorize_item',
+          instructions: `Categorize this shopping item into exactly one category.\nCategories: ${this._getCategoryOrder().join(', ')}\nItem: ${itemName}\nRespond with ONLY: [CATEGORY] Item Name\nExample: [DAIRY] Milk`,
+        },
+        return_response: true,
+      });
+
+      const text = response?.response?.data;
+      const categorized = typeof text === 'string' ? text.trim().split('\n')[0]?.trim() : '';
+
+      if (categorized && parseItem(categorized).category) {
+        await this._fetchItems();
+        const target = this._items.find(i =>
+          i.status !== 'completed' && i.summary.toLowerCase() === itemName.toLowerCase());
+        if (target) {
+          await this._hass.callService('todo', 'update_item',
+            { item: target.uid, rename: categorized },
+            { entity_id: this._config.entity });
+          this._debouncedFetch();
+        }
+      }
+    } catch (e) {
+      console.error('grouped-shopping-list-card: AI categorize failed (item added uncategorized)', e);
+    } finally {
+      addRow?.classList.remove('categorizing');
+    }
+  }
+
+  async _triggerSort() {
+    if (this._isSorting) return;
+    this._isSorting = true;
+    this._sortBtn.classList.add('sorting');
+    try {
+      await this._hass.callService('input_button', 'press', {},
+        { entity_id: this._config.sort_button_entity });
+      // Automation clears list and re-adds. Poll until items come back categorized.
+      const start = Date.now();
+      let sawEmpty = false;
+      while (Date.now() - start < 15000) {
+        await new Promise(r => setTimeout(r, 500));
+        await this._fetchItems();
+        const active = this._items.filter(i => i.status !== 'completed');
+        if (active.length === 0) { sawEmpty = true; continue; }
+        if (sawEmpty) { await new Promise(r => setTimeout(r, 500)); await this._fetchItems(); break; }
+        if (active.every(i => parseItem(i.summary).category !== null)) break;
+      }
+    } catch (e) {
+      console.error('grouped-shopping-list-card: Sort failed', e);
+    } finally {
+      this._isSorting = false;
+      this._sortBtn.classList.remove('sorting');
+    }
+  }
+
+  async _toggleAutoSort() {
+    try {
+      await this._hass.callService('input_boolean', 'toggle', {},
+        { entity_id: this._config.auto_sort_entity });
+    } catch (e) {
+      console.error('grouped-shopping-list-card: Toggle auto-sort failed', e);
+    }
+  }
+
+  async _categorizeUncategorized(btn) {
+    if (btn.classList.contains('working')) return;
+    btn.classList.add('working');
+    try {
+      const uncategorized = this._items.filter(i =>
+        i.status !== 'completed' && parseItem(i.summary).category === null);
+      if (!uncategorized.length) return;
+
+      // First pass: categorize locally what we can
+      const needsAI = [];
+      for (const item of uncategorized) {
+        const localCat = lookupCategory(item.summary);
+        if (localCat) {
+          const properName = item.summary.trim().replace(/^\w/, c => c.toUpperCase());
+          await this._hass.callService('todo', 'update_item',
+            { item: item.uid, rename: `[${localCat}] ${properName}` },
+            { entity_id: this._config.entity });
+        } else {
+          needsAI.push(item);
+        }
+      }
+
+      // Second pass: send remaining unknowns to AI (if any)
+      if (needsAI.length > 0) {
+        const names = needsAI.map(i => i.summary);
+        const response = await this._hass.callWS({
+          type: 'call_service',
+          domain: 'ai_task',
+          service: 'generate_data',
+          service_data: {
+            task_name: 'categorize_items',
+            instructions: `Categorize these shopping items.\nCategories: ${this._getCategoryOrder().join(', ')}\n\nItems:\n${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}\n\nRespond with ONLY the categorized items, one per line:\n[CATEGORY] Item Name`,
+          },
+          return_response: true,
+        });
+
+        const text = response?.response?.data;
+        const lines = typeof text === 'string' ? text.trim().split('\n').filter(l => l.trim()) : [];
+
+        for (let i = 0; i < Math.min(lines.length, needsAI.length); i++) {
+          const categorized = lines[i].trim();
+          if (parseItem(categorized).category) {
+            await this._hass.callService('todo', 'update_item',
+              { item: needsAI[i].uid, rename: categorized },
+              { entity_id: this._config.entity });
+          }
+        }
+      }
+      this._debouncedFetch();
+    } catch (e) {
+      console.error('grouped-shopping-list-card: Categorize uncategorized failed', e);
+    } finally {
+      btn.classList.remove('working');
     }
   }
 
@@ -146,6 +565,22 @@ class GroupedShoppingListCard extends HTMLElement {
       this._debouncedFetch();
     } catch (e) {
       console.error('grouped-shopping-list-card: Failed to delete item', e);
+    }
+  }
+
+  async _clearCompleted() {
+    const completedUids = this._items
+      .filter(i => i.status === 'completed')
+      .map(i => i.uid);
+    if (!completedUids.length) return;
+    try {
+      await this._hass.callService('todo', 'remove_item',
+        { item: completedUids },
+        { entity_id: this._config.entity }
+      );
+      this._debouncedFetch();
+    } catch (e) {
+      console.error('grouped-shopping-list-card: Failed to clear completed items', e);
     }
   }
 
@@ -349,6 +784,113 @@ class GroupedShoppingListCard extends HTMLElement {
           opacity: 0.5;
         }
       }
+      /* Header action buttons */
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .header-btn {
+        width: 32px;
+        height: 32px;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--secondary-text-color);
+        padding: 0;
+        transition: background-color 0.15s, color 0.15s;
+        opacity: 0.5;
+      }
+      .header-btn:hover {
+        background: var(--divider-color, rgba(0,0,0,0.08));
+        color: var(--primary-color);
+        opacity: 1;
+      }
+      .header-btn.active {
+        color: var(--primary-color);
+        opacity: 1;
+      }
+      .header-btn svg {
+        width: 20px;
+        height: 20px;
+        fill: currentColor;
+      }
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      .header-btn.sorting svg {
+        animation: spin 1s linear infinite;
+      }
+      /* Categorize button on uncategorized header */
+      .category-header .categorize-btn {
+        width: 24px;
+        height: 24px;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--secondary-text-color);
+        padding: 0;
+        opacity: 0.5;
+        transition: opacity 0.15s, color 0.15s, background-color 0.15s;
+      }
+      .category-header .categorize-btn:hover {
+        opacity: 1;
+        color: var(--primary-color);
+        background: var(--divider-color, rgba(0,0,0,0.08));
+      }
+      .category-header .categorize-btn.working svg {
+        animation: spin 1s linear infinite;
+      }
+      .category-header .categorize-btn svg {
+        width: 16px;
+        height: 16px;
+        fill: currentColor;
+      }
+      .completed-header .clear-completed-btn {
+        width: 24px;
+        height: 24px;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--secondary-text-color);
+        padding: 0;
+        opacity: 0.5;
+        transition: opacity 0.15s, color 0.15s, background-color 0.15s;
+      }
+      .completed-header .clear-completed-btn:hover {
+        opacity: 1;
+        color: var(--error-color, #db4437);
+        background: var(--divider-color, rgba(0,0,0,0.08));
+      }
+      .completed-header .clear-completed-btn svg {
+        width: 16px;
+        height: 16px;
+        fill: currentColor;
+      }
+      /* Categorizing indicator under input */
+      .add-item-row .categorizing-indicator {
+        display: none;
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        padding: 2px 0 0 4px;
+        font-style: italic;
+      }
+      .add-item-row.categorizing .categorizing-indicator {
+        display: block;
+      }
     `;
     shadow.appendChild(style);
 
@@ -360,10 +902,39 @@ class GroupedShoppingListCard extends HTMLElement {
     const titleSpan = document.createElement('span');
     titleSpan.textContent = this._config.title || 'Shopping List';
     header.appendChild(titleSpan);
+
+    const actions = document.createElement('div');
+    actions.className = 'header-actions';
+
+    // Sort button (Feature 1)
+    this._sortBtn = document.createElement('button');
+    this._sortBtn.className = 'header-btn';
+    this._sortBtn.title = 'Sort & categorize all items';
+    this._sortBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 18h6v-2H3v2zM3 6v2h18V6H3zm0 7h12v-2H3v2z"/></svg>';
+    this._sortBtn.addEventListener('click', (e) => { e.stopPropagation(); this._triggerSort(); });
+    actions.appendChild(this._sortBtn);
+
+    // Auto-sort toggle (Feature 4)
+    this._autoSortBtn = document.createElement('button');
+    this._autoSortBtn.className = 'header-btn';
+    this._autoSortBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19.89 10.75c.07.41.11.82.11 1.25 0 4.41-3.59 8-8 8s-8-3.59-8-8 3.59-8 8-8c1.62 0 3.13.49 4.39 1.32l-1.68 1.68A5.945 5.945 0 0 0 12 6c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6c0-.34-.04-.67-.09-1h2.02zM19 2h2v3h3v2h-3v3h-2V7h-3V5h3V2z"/></svg>';
+    const autoSortEntity = this._config.auto_sort_entity;
+    if (this._hass && this._hass.states[autoSortEntity]) {
+      const isOn = this._hass.states[autoSortEntity].state === 'on';
+      this._autoSortBtn.classList.toggle('active', isOn);
+      this._autoSortBtn._lastState = this._hass.states[autoSortEntity].state;
+      this._autoSortBtn.title = isOn ? 'Auto-categorize: ON' : 'Auto-categorize: OFF';
+    } else {
+      this._autoSortBtn.title = 'Auto-categorize';
+    }
+    this._autoSortBtn.addEventListener('click', (e) => { e.stopPropagation(); this._toggleAutoSort(); });
+    actions.appendChild(this._autoSortBtn);
+
     this._countBadge = document.createElement('span');
     this._countBadge.className = 'count';
     this._countBadge.textContent = '0';
-    header.appendChild(this._countBadge);
+    actions.appendChild(this._countBadge);
+    header.appendChild(actions);
     card.appendChild(header);
 
     // Add item input — persists across renders, never destroyed
@@ -403,6 +974,10 @@ class GroupedShoppingListCard extends HTMLElement {
       }
     });
     addRow.appendChild(this._addInput);
+    const catIndicator = document.createElement('div');
+    catIndicator.className = 'categorizing-indicator';
+    catIndicator.textContent = 'Categorizing...';
+    addRow.appendChild(catIndicator);
     card.appendChild(addRow);
 
     // Items container — diffed on updates, never torn down
@@ -456,11 +1031,11 @@ class GroupedShoppingListCard extends HTMLElement {
 
     // Build ordered category list
     const orderedCategories = [];
-    for (const cat of CATEGORY_ORDER) {
+    for (const cat of this._getCategoryOrder()) {
       if (groups[cat]) orderedCategories.push(cat);
     }
     for (const cat of Object.keys(groups)) {
-      if (!CATEGORY_ORDER.includes(cat)) orderedCategories.push(cat);
+      if (!this._getCategoryOrder().includes(cat)) orderedCategories.push(cat);
     }
 
     // Build desired element descriptors (keyed for diffing)
@@ -472,7 +1047,7 @@ class GroupedShoppingListCard extends HTMLElement {
 
     // Uncategorized first
     if (uncategorized.length > 0) {
-      desired.push({ key: 'cat:UNCATEGORIZED', type: 'category', emoji: UNCATEGORIZED_EMOJI, label: UNCATEGORIZED_LABEL });
+      desired.push({ key: 'cat:UNCATEGORIZED', type: 'category', emoji: UNCATEGORIZED_EMOJI, label: UNCATEGORIZED_LABEL, showCategorizeBtn: true });
       for (const item of uncategorized) {
         desired.push({ key: `item:${item.uid}`, type: 'item', item, completed: false });
       }
@@ -548,7 +1123,7 @@ class GroupedShoppingListCard extends HTMLElement {
         node.textContent = 'Your shopping list is empty';
         break;
       case 'category':
-        node = this._createCategoryHeader(desc.emoji, desc.label);
+        node = this._createCategoryHeader(desc.emoji, desc.label, desc.showCategorizeBtn);
         break;
       case 'item':
         node = this._createItemRow(desc.item, desc.completed);
@@ -584,7 +1159,7 @@ class GroupedShoppingListCard extends HTMLElement {
     }
   }
 
-  _createCategoryHeader(emoji, label) {
+  _createCategoryHeader(emoji, label, showCategorizeBtn = false) {
     const div = document.createElement('div');
     div.className = 'category-header';
     const emojiSpan = document.createElement('span');
@@ -593,6 +1168,14 @@ class GroupedShoppingListCard extends HTMLElement {
     const labelSpan = document.createElement('span');
     labelSpan.textContent = label;
     div.appendChild(labelSpan);
+    if (showCategorizeBtn) {
+      const btn = document.createElement('button');
+      btn.className = 'categorize-btn';
+      btn.title = 'Categorize with AI';
+      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M7.5 5.6L10 7 8.6 4.5 10 2 7.5 3.4 5 2l1.4 2.5L5 7zm12 9.8L17 14l1.4 2.5L17 19l2.5-1.4L22 19l-1.4-2.5L22 14zM22 2l-2.5 1.4L17 2l1.4 2.5L17 7l2.5-1.4L22 7l-1.4-2.5zm-7.63 5.29a.996.996 0 0 0-1.41 0L1.29 18.96a.996.996 0 0 0 0 1.41l2.34 2.34c.39.39 1.02.39 1.41 0L16.7 11.05a.996.996 0 0 0 0-1.41l-2.33-2.35z"/></svg>';
+      btn.addEventListener('click', (e) => { e.stopPropagation(); this._categorizeUncategorized(btn); });
+      div.appendChild(btn);
+    }
     const line = document.createElement('span');
     line.className = 'line';
     div.appendChild(line);
@@ -660,6 +1243,16 @@ class GroupedShoppingListCard extends HTMLElement {
     const rightLine = document.createElement('span');
     rightLine.className = 'line';
     header.appendChild(rightLine);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'clear-completed-btn';
+    clearBtn.title = 'Clear all completed items';
+    clearBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+    clearBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._clearCompleted();
+    });
+    header.appendChild(clearBtn);
 
     const chevron = document.createElement('span');
     chevron.className = 'chevron' + (this._completedCollapsed ? ' collapsed' : '');
@@ -778,6 +1371,30 @@ class GroupedShoppingListCardEditor extends HTMLElement {
           font-size: 14px;
           font-family: inherit;
         }
+        .cat-order-list { list-style: none; padding: 0; margin: 4px 0 0; }
+        .cat-order-item {
+          display: flex; align-items: center; gap: 8px;
+          padding: 4px 8px; border-radius: 6px;
+          font-size: 13px; color: var(--primary-text-color);
+        }
+        .cat-order-item:hover { background: var(--divider-color, rgba(0,0,0,0.04)); }
+        .cat-order-item .emoji { width: 20px; text-align: center; }
+        .cat-order-item .label { flex: 1; }
+        .cat-order-btn {
+          width: 24px; height: 24px; border: none; background: transparent;
+          cursor: pointer; border-radius: 50%; display: flex;
+          align-items: center; justify-content: center;
+          color: var(--secondary-text-color); padding: 0;
+        }
+        .cat-order-btn:hover { background: var(--divider-color, rgba(0,0,0,0.08)); color: var(--primary-color); }
+        .cat-order-btn:disabled { opacity: 0.2; cursor: default; }
+        .cat-order-btn:disabled:hover { background: transparent; color: var(--secondary-text-color); }
+        .cat-order-btn svg { width: 16px; height: 16px; fill: currentColor; }
+        .cat-order-reset {
+          font-size: 12px; color: var(--primary-color); background: none;
+          border: none; cursor: pointer; padding: 4px 0; margin-top: 4px;
+        }
+        .cat-order-reset:hover { text-decoration: underline; }
       </style>
       <div class="editor">
         <div>
@@ -787,6 +1404,17 @@ class GroupedShoppingListCardEditor extends HTMLElement {
         <div>
           <label>Title (optional)</label>
           <input id="title" value="${this._config.title || ''}" placeholder="Shopping List">
+        </div>
+        <div>
+          <label>Sort Button Entity (optional)</label>
+          <input id="sort_button_entity" value="${this._config.sort_button_entity || ''}" placeholder="input_button.sort_shopping_list_button">
+        </div>
+        <div>
+          <label>Auto-Sort Toggle Entity (optional)</label>
+          <input id="auto_sort_entity" value="${this._config.auto_sort_entity || ''}" placeholder="input_boolean.auto_sort_shopping_list">
+        </div>
+        <div id="cat-order-container">
+          <label>Category Order</label>
         </div>
       </div>
     `;
@@ -799,6 +1427,92 @@ class GroupedShoppingListCardEditor extends HTMLElement {
       this._config = { ...this._config, title: e.target.value };
       this._fireChanged();
     });
+    this.shadowRoot.getElementById('sort_button_entity').addEventListener('input', (e) => {
+      this._config = { ...this._config, sort_button_entity: e.target.value };
+      this._fireChanged();
+    });
+    this.shadowRoot.getElementById('auto_sort_entity').addEventListener('input', (e) => {
+      this._config = { ...this._config, auto_sort_entity: e.target.value };
+      this._fireChanged();
+    });
+
+    this._renderCategoryOrder();
+  }
+
+  _renderCategoryOrder() {
+    const container = this.shadowRoot.getElementById('cat-order-container');
+    if (!container) return;
+
+    // Remove old list and reset button if present
+    const oldList = container.querySelector('.cat-order-list');
+    if (oldList) oldList.remove();
+    const oldReset = container.querySelector('.cat-order-reset');
+    if (oldReset) oldReset.remove();
+
+    const order = Array.isArray(this._config.category_order) && this._config.category_order.length > 0
+      ? this._config.category_order
+      : [...CATEGORY_ORDER];
+
+    const ul = document.createElement('ul');
+    ul.className = 'cat-order-list';
+
+    order.forEach((cat, idx) => {
+      const li = document.createElement('li');
+      li.className = 'cat-order-item';
+
+      const emojiSpan = document.createElement('span');
+      emojiSpan.className = 'emoji';
+      emojiSpan.textContent = CATEGORY_EMOJI[cat] || '📦';
+      li.appendChild(emojiSpan);
+
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'label';
+      labelSpan.textContent = cat;
+      li.appendChild(labelSpan);
+
+      // Up button
+      const upBtn = document.createElement('button');
+      upBtn.className = 'cat-order-btn';
+      upBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>';
+      upBtn.disabled = idx === 0;
+      upBtn.addEventListener('click', () => {
+        const newOrder = [...order];
+        [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
+        this._config = { ...this._config, category_order: newOrder };
+        this._fireChanged();
+        this._renderCategoryOrder();
+      });
+      li.appendChild(upBtn);
+
+      // Down button
+      const downBtn = document.createElement('button');
+      downBtn.className = 'cat-order-btn';
+      downBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>';
+      downBtn.disabled = idx === order.length - 1;
+      downBtn.addEventListener('click', () => {
+        const newOrder = [...order];
+        [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]];
+        this._config = { ...this._config, category_order: newOrder };
+        this._fireChanged();
+        this._renderCategoryOrder();
+      });
+      li.appendChild(downBtn);
+
+      ul.appendChild(li);
+    });
+
+    container.appendChild(ul);
+
+    // Reset button
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'cat-order-reset';
+    resetBtn.textContent = 'Reset to default';
+    resetBtn.addEventListener('click', () => {
+      this._config = { ...this._config, category_order: [...CATEGORY_ORDER] };
+      this._fireChanged();
+      this._renderCategoryOrder();
+    });
+    container.appendChild(resetBtn);
   }
 
   _fireChanged() {

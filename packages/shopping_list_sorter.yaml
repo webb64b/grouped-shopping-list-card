@@ -1,0 +1,157 @@
+# Shopping List AI Sorter Package
+# Provides the full-list sort button, auto-sort toggle, and daily auto-sort.
+#
+# Requirements:
+#   - An AI integration that exposes the ai_task.generate_data service
+#     (e.g. OpenAI Conversation, Anthropic, Google Generative AI)
+#   - The todo.shopping_list entity (default HA shopping list)
+#
+# Installation:
+#   1. Copy this file to your config/packages/ directory
+#   2. Add "packages: !include_dir_named packages" to configuration.yaml
+#      (if not already present)
+#   3. Restart Home Assistant
+
+automation:
+  - id: sort_shopping_list_button
+    alias: Sort Shopping List (Button)
+    description: Sort shopping list by category when button is pressed
+    mode: single
+    max_exceeded: silent
+
+    trigger:
+      - platform: state
+        entity_id: input_button.sort_shopping_list_button
+
+    action:
+      # Get current shopping list items
+      - service: todo.get_items
+        target:
+          entity_id: todo.shopping_list
+        response_variable: current_items
+        data:
+          status: needs_action
+
+      # Only sort if we have items
+      - condition: template
+        value_template: "{{ current_items['todo.shopping_list']['items'] | length > 0 }}"
+
+      # Use AI to categorize items
+      - action: ai_task.generate_data
+        data:
+          task_name: "sort_shopping_list"
+          instructions: |
+            Sort these shopping items into categories and format each item with its category prefix.
+
+            Categories: PRODUCE, MEAT, DAIRY, FROZEN, BAKERY, PANTRY, BEVERAGES, SNACKS, HEALTH, HOUSEHOLD, OTHER
+
+            Format each item as: [CATEGORY] item name
+
+            Example output:
+            [PRODUCE] apples
+            [PRODUCE] bananas
+            [DAIRY] milk
+            [DAIRY] cheese
+            [MEAT] chicken
+            [BAKERY] bread
+
+            Return ONLY the formatted items, one per line, grouped by category.
+
+            Items to sort: {{ current_items['todo.shopping_list']['items'] | map(attribute='summary') | join(', ') }}
+        response_variable: sorted_list
+        continue_on_error: true
+
+      # Process if successful
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ sorted_list is defined and sorted_list.data is defined }}"
+            sequence:
+              # Clear and re-add items
+              - service: shopping_list.complete_all
+              - delay:
+                  milliseconds: 500
+              - service: shopping_list.clear_completed_items
+
+              # Parse AI response and add back sorted with prefixes
+              - variables:
+                  lines: "{{ sorted_list.data.split('\n') }}"
+              - repeat:
+                  for_each: "{{ lines }}"
+                  sequence:
+                    - choose:
+                        # Skip empty lines
+                        - conditions:
+                            - condition: template
+                              value_template: "{{ repeat.item | trim == '' }}"
+                          sequence: []
+                      # Add all non-empty lines as items
+                      default:
+                        - service: shopping_list.add_item
+                          data:
+                            name: "{{ repeat.item | trim }}"
+
+  # Daily safety net: categorize any uncategorized items (e.g. added via voice/app)
+  - id: sort_shopping_list_daily
+    alias: Sort Shopping List (Daily)
+    description: Categorize any uncategorized shopping list items at 9 AM
+    trigger:
+      - platform: time
+        at: "09:00:00"
+    condition:
+      - condition: state
+        entity_id: input_boolean.auto_sort_shopping_list
+        state: 'on'
+    action:
+      # Fetch items and check for uncategorized ones before calling AI
+      - service: todo.get_items
+        target:
+          entity_id: todo.shopping_list
+        response_variable: current_items
+        data:
+          status: needs_action
+      - condition: template
+        value_template: >
+          {{ current_items['todo.shopping_list']['items']
+             | selectattr('summary', 'match', '^(?!\\[).*')
+             | list | length > 0 }}
+      - service: automation.trigger
+        target:
+          entity_id: automation.sort_shopping_list_button
+
+# Input helpers
+input_button:
+  sort_shopping_list_button:
+    name: Sort Shopping List
+    icon: mdi:sort-variant
+
+input_boolean:
+  auto_sort_shopping_list:
+    name: Auto-Categorize Shopping List
+    icon: mdi:sort-clock-ascending
+
+# Optional: Add to shopping list via voice/text
+script:
+  add_items_to_shopping_list:
+    alias: Add Multiple Items to Shopping List
+    fields:
+      items:
+        description: Comma-separated list of items to add
+        example: "milk, bread, apples, chicken"
+    sequence:
+      - variables:
+          item_list: "{{ items.split(',') }}"
+      - repeat:
+          for_each: "{{ item_list }}"
+          sequence:
+            - service: shopping_list.add_item
+              data:
+                name: "{{ repeat.item | trim }}"
+
+  # Simple alphabetical sort (no AI)
+  sort_shopping_list_alphabetical:
+    alias: Sort Shopping List Alphabetically
+    sequence:
+      - service: shopping_list.sort
+        data:
+          reverse: false
