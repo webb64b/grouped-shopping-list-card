@@ -5,6 +5,13 @@
  * dismiss the keyboard on every hass update.
  */
 
+const CARD_VERSION = '1.0.0';
+console.info(
+  `%c GROUPED-SHOPPING-LIST-CARD %c v${CARD_VERSION} `,
+  'color: white; background: #555; font-weight: bold; padding: 2px 4px;',
+  'color: white; background: #1c8c4c; font-weight: bold; padding: 2px 4px;'
+);
+
 const CATEGORY_EMOJI = {
   PRODUCE: '🥬',
   MEAT: '🥩',

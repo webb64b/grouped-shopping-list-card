@@ -75,7 +75,7 @@ title: Shopping List
 
 Either method gives you the grouped display, manual item management, and the built-in categorization features (local lookup + AI categorize button).
 
-### Step 2: Install the Automation Package (optional)
+### Automation Package (optional)
 
 This adds the sort button, auto-categorize toggle, and daily auto-sort.
 
