@@ -5,6 +5,10 @@ A custom Lovelace card for Home Assistant that groups shopping list items by cat
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5?logo=homeassistantcommunitystore)](https://github.com/hacs/integration)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.1+-blue)
 
+<p align="center">
+  <img src="screenshot.jpeg" alt="Grouped Shopping List Card" width="400">
+</p>
+
 ## Features
 
 ### Core (card only, no extra config needed)
