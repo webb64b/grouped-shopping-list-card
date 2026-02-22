@@ -652,12 +652,26 @@ class GroupedShoppingListCard extends HTMLElement {
         height: 1px;
         background: var(--divider-color, rgba(0,0,0,0.12));
       }
+      @keyframes fadeSlideIn {
+        from { opacity: 0; transform: translateY(-8px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes fadeSlideOut {
+        from { opacity: 1; max-height: 50px; }
+        to   { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; }
+      }
       .item-row {
         display: flex;
         align-items: center;
         padding: 6px 8px 6px 16px;
         gap: 8px;
         transition: background-color 0.15s;
+        animation: fadeSlideIn 0.25s ease-out;
+      }
+      .item-row.removing {
+        animation: fadeSlideOut 0.25s ease-in forwards;
+        pointer-events: none;
+        overflow: hidden;
       }
       .item-row:hover {
         background: var(--secondary-background-color, rgba(0,0,0,0.04));
@@ -1091,7 +1105,14 @@ class GroupedShoppingListCard extends HTMLElement {
     // Remove children no longer in the desired list
     for (const [key, child] of existingByKey) {
       if (!desiredKeys.has(key)) {
-        child.remove();
+        if (child.classList?.contains('item-row')) {
+          child.classList.add('removing');
+          child.dataset.key = ''; // Unkey so future diffs ignore it
+          child.addEventListener('animationend', () => child.remove(), { once: true });
+          setTimeout(() => { if (child.parentNode) child.remove(); }, 300); // safety fallback
+        } else {
+          child.remove();
+        }
         existingByKey.delete(key);
       }
     }
