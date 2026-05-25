@@ -5,7 +5,7 @@
  * dismiss the keyboard on every hass update.
  */
 
-const CARD_VERSION = '1.0.0';
+const CARD_VERSION = '1.1.0';
 console.info(
   `%c GROUPED-SHOPPING-LIST-CARD %c v${CARD_VERSION} `,
   'color: white; background: #555; font-weight: bold; padding: 2px 4px;',
@@ -294,6 +294,16 @@ class GroupedShoppingListCard extends HTMLElement {
     this._countBadge = null;
     this._addInput = null;
     this._itemsContainer = null;
+    // Category picker state
+    this._openPickerUid = null;
+    this._docClickHandler = null;
+    // Autocomplete state
+    this._history = {};
+    this._suggestionsLoaded = false;
+    this._suggestionsPanel = null;
+    this._suggestions = [];
+    this._selectedSuggestionIdx = -1;
+    this._blurHideTimer = null;
   }
 
   static getConfigElement() {
@@ -318,6 +328,8 @@ class GroupedShoppingListCard extends HTMLElement {
     // Rebuild shell if config changes (e.g. title)
     this._shellBuilt = false;
     this._initialFetchDone = false;
+    this._suggestionsLoaded = false;
+    this._history = {};
   }
 
   _getCategoryOrder() {
@@ -335,6 +347,7 @@ class GroupedShoppingListCard extends HTMLElement {
     // Initial fetch on first hass set
     if (!this._initialFetchDone) {
       this._initialFetchDone = true;
+      this._loadHistory();
       this._fetchItems();
       return;
     }
@@ -366,27 +379,110 @@ class GroupedShoppingListCard extends HTMLElement {
 
   async _fetchItems() {
     if (!this._hass || !this._config.entity) return;
+    let serverItems;
     try {
       const result = await this._hass.callWS({
         type: 'todo/item/list',
         entity_id: this._config.entity,
       });
-      this._items = result.items || [];
-      this._renderItems();
+      serverItems = result.items || [];
     } catch (e) {
       console.error('grouped-shopping-list-card: Failed to fetch items', e);
+      return;
     }
+    this._items = this._reconcile(this._items, serverItems);
+    this._renderItems();
+  }
+
+  /**
+   * Merge server state with local optimistic state.
+   *  - Items pending-delete locally are excluded (server may still return them briefly)
+   *  - Temp items (uid 'tmp-…') match server items by lowercased summary; on match, swap to real uid
+   *  - Items with _pending on a real uid keep their local fields (in-flight rename/toggle)
+   *  - Unmatched temp items younger than 10s are kept; older are dropped (add failed silently)
+   *  - Items present locally without _pending that the server no longer has are dropped (external delete)
+   */
+  _reconcile(local, server) {
+    const tempItems = local.filter(i => i.uid.startsWith('tmp-') && !i._pendingDelete);
+    const localPendingByUid = new Map(
+      local.filter(i => i._pending && !i.uid.startsWith('tmp-')).map(i => [i.uid, i])
+    );
+    const locallyDeletedUids = new Set(
+      local.filter(i => i._pendingDelete && !i.uid.startsWith('tmp-')).map(i => i.uid)
+    );
+
+    const result = [];
+    const consumedTempIndices = new Set();
+
+    for (const s of server) {
+      if (locallyDeletedUids.has(s.uid)) continue;
+
+      // Match against a pending temp by summary
+      let matchedTempIdx = -1;
+      for (let i = 0; i < tempItems.length; i++) {
+        if (consumedTempIndices.has(i)) continue;
+        if (tempItems[i].summary.toLowerCase() === s.summary.toLowerCase()) {
+          matchedTempIdx = i;
+          break;
+        }
+      }
+      if (matchedTempIdx !== -1) {
+        consumedTempIndices.add(matchedTempIdx);
+        result.push({ ...s });
+        continue;
+      }
+
+      if (localPendingByUid.has(s.uid)) {
+        result.push(localPendingByUid.get(s.uid));
+        continue;
+      }
+
+      result.push({ ...s });
+    }
+
+    // Keep unmatched young temp items
+    const now = Date.now();
+    for (let i = 0; i < tempItems.length; i++) {
+      if (consumedTempIndices.has(i)) continue;
+      const age = now - (tempItems[i]._addedAt || 0);
+      if (age < 10000) result.push(tempItems[i]);
+    }
+
+    return result;
+  }
+
+  _genTempUid() {
+    return 'tmp-' + (
+      (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2) + Date.now().toString(36)
+    );
   }
 
   async _addItem(name) {
     if (!name.trim()) return;
     const trimmed = name.trim();
+
+    // Optimistic insert with a temp uid
+    const optimistic = {
+      uid: this._genTempUid(),
+      summary: trimmed,
+      status: 'needs_action',
+      _pending: true,
+      _addedAt: Date.now(),
+    };
+    this._items.push(optimistic);
+    this._renderItems();
+    this._recordHistory(trimmed);
+
     try {
       await this._hass.callService('todo', 'add_item', { item: trimmed },
         { entity_id: this._config.entity });
       this._debouncedFetch();
     } catch (e) {
       console.error('grouped-shopping-list-card: Failed to add item', e);
+      this._items = this._items.filter(i => i.uid !== optimistic.uid);
+      this._renderItems();
       return;
     }
 
@@ -409,13 +505,21 @@ class GroupedShoppingListCard extends HTMLElement {
       const properName = itemName.trim().replace(/^\w/, c => c.toUpperCase());
       const categorized = `[${localCat}] ${properName}`;
       try {
+        // Wait for the temp item to be reconciled into a real uid
         await this._fetchItems();
         const target = this._items.find(i =>
-          i.status !== 'completed' && i.summary.toLowerCase() === itemName.toLowerCase());
+          !i.uid.startsWith('tmp-') &&
+          i.status !== 'completed' &&
+          i.summary.toLowerCase() === itemName.toLowerCase());
         if (target) {
+          target.summary = categorized;
+          target._pending = true;
+          this._renderItems();
           await this._hass.callService('todo', 'update_item',
             { item: target.uid, rename: categorized },
             { entity_id: this._config.entity });
+          delete target._pending;
+          this._renderItems();
           this._debouncedFetch();
         }
       } catch (e) {
@@ -444,11 +548,18 @@ class GroupedShoppingListCard extends HTMLElement {
       if (categorized && parseItem(categorized).category) {
         await this._fetchItems();
         const target = this._items.find(i =>
-          i.status !== 'completed' && i.summary.toLowerCase() === itemName.toLowerCase());
+          !i.uid.startsWith('tmp-') &&
+          i.status !== 'completed' &&
+          i.summary.toLowerCase() === itemName.toLowerCase());
         if (target) {
+          target.summary = categorized;
+          target._pending = true;
+          this._renderItems();
           await this._hass.callService('todo', 'update_item',
             { item: target.uid, rename: categorized },
             { entity_id: this._config.entity });
+          delete target._pending;
+          this._renderItems();
           this._debouncedFetch();
         }
       }
@@ -502,44 +613,61 @@ class GroupedShoppingListCard extends HTMLElement {
         i.status !== 'completed' && parseItem(i.summary).category === null);
       if (!uncategorized.length) return;
 
-      // First pass: categorize locally what we can
+      // First pass: categorize locally what we can (optimistic + service call)
       const needsAI = [];
+      const locallyRenamed = [];
       for (const item of uncategorized) {
+        if (item.uid.startsWith('tmp-')) { needsAI.push(item); continue; }
         const localCat = lookupCategory(item.summary);
         if (localCat) {
           const properName = item.summary.trim().replace(/^\w/, c => c.toUpperCase());
+          const renamed = `[${localCat}] ${properName}`;
+          item.summary = renamed;
+          item._pending = true;
+          locallyRenamed.push(item);
           await this._hass.callService('todo', 'update_item',
-            { item: item.uid, rename: `[${localCat}] ${properName}` },
+            { item: item.uid, rename: renamed },
             { entity_id: this._config.entity });
         } else {
           needsAI.push(item);
         }
       }
+      for (const item of locallyRenamed) delete item._pending;
+      this._renderItems();
 
       // Second pass: send remaining unknowns to AI (if any)
       if (needsAI.length > 0) {
-        const names = needsAI.map(i => i.summary);
-        const response = await this._hass.callWS({
-          type: 'call_service',
-          domain: 'ai_task',
-          service: 'generate_data',
-          service_data: {
-            task_name: 'categorize_items',
-            instructions: `Categorize these shopping items.\nCategories: ${this._getCategoryOrder().join(', ')}\n\nItems:\n${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}\n\nRespond with ONLY the categorized items, one per line:\n[CATEGORY] Item Name`,
-          },
-          return_response: true,
-        });
+        const aiItems = needsAI.filter(i => !i.uid.startsWith('tmp-'));
+        const names = aiItems.map(i => i.summary);
+        if (names.length > 0) {
+          const response = await this._hass.callWS({
+            type: 'call_service',
+            domain: 'ai_task',
+            service: 'generate_data',
+            service_data: {
+              task_name: 'categorize_items',
+              instructions: `Categorize these shopping items.\nCategories: ${this._getCategoryOrder().join(', ')}\n\nItems:\n${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}\n\nRespond with ONLY the categorized items, one per line:\n[CATEGORY] Item Name`,
+            },
+            return_response: true,
+          });
 
-        const text = response?.response?.data;
-        const lines = typeof text === 'string' ? text.trim().split('\n').filter(l => l.trim()) : [];
+          const text = response?.response?.data;
+          const lines = typeof text === 'string' ? text.trim().split('\n').filter(l => l.trim()) : [];
 
-        for (let i = 0; i < Math.min(lines.length, needsAI.length); i++) {
-          const categorized = lines[i].trim();
-          if (parseItem(categorized).category) {
-            await this._hass.callService('todo', 'update_item',
-              { item: needsAI[i].uid, rename: categorized },
-              { entity_id: this._config.entity });
+          const aiRenamed = [];
+          for (let i = 0; i < Math.min(lines.length, aiItems.length); i++) {
+            const categorized = lines[i].trim();
+            if (parseItem(categorized).category) {
+              aiItems[i].summary = categorized;
+              aiItems[i]._pending = true;
+              aiRenamed.push(aiItems[i]);
+              await this._hass.callService('todo', 'update_item',
+                { item: aiItems[i].uid, rename: categorized },
+                { entity_id: this._config.entity });
+            }
           }
+          for (const item of aiRenamed) delete item._pending;
+          this._renderItems();
         }
       }
       this._debouncedFetch();
@@ -551,43 +679,259 @@ class GroupedShoppingListCard extends HTMLElement {
   }
 
   async _toggleItem(uid, currentStatus) {
+    if (uid.startsWith('tmp-')) return; // wait for reconciliation
+    const item = this._items.find(i => i.uid === uid);
+    if (!item) return;
     const newStatus = currentStatus === 'completed' ? 'needs_action' : 'completed';
+    const prevStatus = item.status;
+    item.status = newStatus;
+    item._pending = true;
+    this._renderItems();
     try {
       await this._hass.callService('todo', 'update_item',
         { item: uid, status: newStatus },
         { entity_id: this._config.entity }
       );
+      delete item._pending;
+      this._renderItems();
       this._debouncedFetch();
     } catch (e) {
       console.error('grouped-shopping-list-card: Failed to toggle item', e);
+      item.status = prevStatus;
+      delete item._pending;
+      this._renderItems();
     }
   }
 
   async _deleteItem(uid) {
+    const item = this._items.find(i => i.uid === uid);
+    if (!item) return;
+    if (uid.startsWith('tmp-')) return; // wait for reconciliation
+    item._pendingDelete = true;
+    this._renderItems();
     try {
       await this._hass.callService('todo', 'remove_item',
         { item: [uid] },
         { entity_id: this._config.entity }
       );
+      this._items = this._items.filter(i => i.uid !== uid);
       this._debouncedFetch();
     } catch (e) {
       console.error('grouped-shopping-list-card: Failed to delete item', e);
+      delete item._pendingDelete;
+      this._renderItems();
+    }
+  }
+
+  _historyKey() {
+    return 'gslc_history_' + (this._config.entity || 'default');
+  }
+
+  _loadHistory() {
+    if (this._suggestionsLoaded) return;
+    this._suggestionsLoaded = true;
+    try {
+      const raw = localStorage.getItem(this._historyKey());
+      this._history = raw ? (JSON.parse(raw) || {}) : {};
+    } catch (e) {
+      this._history = {};
+    }
+  }
+
+  _saveHistory() {
+    try {
+      const entries = Object.entries(this._history).sort((a, b) => b[1].count - a[1].count);
+      const capped = {};
+      for (const [k, v] of entries.slice(0, 100)) capped[k] = v;
+      this._history = capped;
+      localStorage.setItem(this._historyKey(), JSON.stringify(capped));
+    } catch (e) {
+      console.warn('grouped-shopping-list-card: history save failed', e);
+    }
+  }
+
+  _recordHistory(name) {
+    const parsed = parseItem((name || '').trim());
+    const key = parsed.name.toLowerCase().trim();
+    if (!key) return;
+    if (!this._history[key]) this._history[key] = { count: 0, lastUsed: 0 };
+    this._history[key].count += 1;
+    this._history[key].lastUsed = Date.now();
+    this._saveHistory();
+  }
+
+  _computeSuggestions(query) {
+    const q = (query || '').toLowerCase().trim();
+    if (!q) return [];
+    const seen = new Set();
+    const candidates = [];
+
+    for (const [name, meta] of Object.entries(this._history)) {
+      if (!name.includes(q)) continue;
+      candidates.push({
+        name,
+        source: 'history',
+        count: meta.count || 0,
+        isPrefix: name.startsWith(q),
+      });
+      seen.add(name);
+    }
+
+    for (const name of Object.keys(COMMON_ITEMS)) {
+      if (seen.has(name)) continue;
+      if (!name.includes(q)) continue;
+      candidates.push({
+        name,
+        source: 'dictionary',
+        count: 0,
+        isPrefix: name.startsWith(q),
+      });
+    }
+
+    candidates.sort((a, b) => {
+      if (a.isPrefix !== b.isPrefix) return a.isPrefix ? -1 : 1;
+      if (a.source !== b.source) return a.source === 'history' ? -1 : 1;
+      if (a.count !== b.count) return b.count - a.count;
+      return a.name.localeCompare(b.name);
+    });
+
+    return candidates.filter(c => c.name !== q).slice(0, 5);
+  }
+
+  _renderSuggestions() {
+    const panel = this._suggestionsPanel;
+    if (!panel) return;
+    panel.innerHTML = '';
+    if (!this._suggestions.length) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    this._suggestions.forEach((s, idx) => {
+      const btn = document.createElement('button');
+      btn.className = 'suggestion' + (idx === this._selectedSuggestionIdx ? ' selected' : '');
+      btn.type = 'button';
+
+      const catEmoji = document.createElement('span');
+      catEmoji.className = 'sug-emoji';
+      const cat = lookupCategory(s.name);
+      catEmoji.textContent = cat ? (CATEGORY_EMOJI[cat] || '📦') : UNCATEGORIZED_EMOJI;
+      btn.appendChild(catEmoji);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'sug-name';
+      nameSpan.textContent = s.name;
+      btn.appendChild(nameSpan);
+
+      if (s.source === 'history') {
+        const tag = document.createElement('span');
+        tag.className = 'sug-tag';
+        tag.textContent = 'recent';
+        btn.appendChild(tag);
+      }
+
+      // Preserve iOS keyboard: don't let mousedown blur the input
+      btn.addEventListener('mousedown', (e) => e.preventDefault());
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._acceptSuggestion(s.name);
+      });
+
+      panel.appendChild(btn);
+    });
+  }
+
+  _clearSuggestions() {
+    this._suggestions = [];
+    this._selectedSuggestionIdx = -1;
+    this._renderSuggestions();
+  }
+
+  _acceptSuggestion(name) {
+    if (!this._addInput) return;
+    this._addInput.value = '';
+    this._clearSuggestions();
+    this._addItem(name);
+    this._addInput.focus();
+  }
+
+  _openPicker(uid) {
+    if (this._openPickerUid === uid) {
+      this._closePicker();
+      return;
+    }
+    this._openPickerUid = uid;
+    this._renderItems();
+    if (this._docClickHandler) {
+      document.removeEventListener('click', this._docClickHandler, true);
+    }
+    this._docClickHandler = (e) => {
+      const path = e.composedPath();
+      const insidePicker = path.some(el => el.classList?.contains('category-picker'));
+      const onCategoryBtn = path.some(el => el.classList?.contains('category-btn'));
+      if (!insidePicker && !onCategoryBtn) this._closePicker();
+    };
+    setTimeout(() => document.addEventListener('click', this._docClickHandler, true), 0);
+  }
+
+  _closePicker() {
+    this._openPickerUid = null;
+    if (this._docClickHandler) {
+      document.removeEventListener('click', this._docClickHandler, true);
+      this._docClickHandler = null;
+    }
+    this._renderItems();
+  }
+
+  async _setItemCategory(uid, newCat) {
+    const item = this._items.find(i => i.uid === uid);
+    if (!item) return;
+    const parsed = parseItem(item.summary);
+    const cleanName = parsed.name.trim();
+    const properName = cleanName.replace(/^\w/, c => c.toUpperCase());
+    const newSummary = newCat ? `[${newCat}] ${properName}` : properName;
+    if (newSummary === item.summary) {
+      this._closePicker();
+      return;
+    }
+    const prevSummary = item.summary;
+    item.summary = newSummary;
+    item._pending = true;
+    this._closePicker();
+    try {
+      await this._hass.callService('todo', 'update_item',
+        { item: uid, rename: newSummary },
+        { entity_id: this._config.entity });
+      delete item._pending;
+      this._renderItems();
+      this._debouncedFetch();
+    } catch (e) {
+      console.error('grouped-shopping-list-card: Failed to set category', e);
+      item.summary = prevSummary;
+      delete item._pending;
+      this._renderItems();
     }
   }
 
   async _clearCompleted() {
-    const completedUids = this._items
-      .filter(i => i.status === 'completed')
-      .map(i => i.uid);
-    if (!completedUids.length) return;
+    const completedItems = this._items.filter(i =>
+      i.status === 'completed' && !i._pendingDelete && !i.uid.startsWith('tmp-'));
+    if (!completedItems.length) return;
+    const completedUids = completedItems.map(i => i.uid);
+    for (const item of completedItems) item._pendingDelete = true;
+    this._renderItems();
     try {
       await this._hass.callService('todo', 'remove_item',
         { item: completedUids },
         { entity_id: this._config.entity }
       );
+      const uidSet = new Set(completedUids);
+      this._items = this._items.filter(i => !uidSet.has(i.uid));
       this._debouncedFetch();
     } catch (e) {
       console.error('grouped-shopping-list-card: Failed to clear completed items', e);
+      for (const item of completedItems) delete item._pendingDelete;
+      this._renderItems();
     }
   }
 
@@ -679,6 +1023,15 @@ class GroupedShoppingListCard extends HTMLElement {
         animation: fadeSlideOut 0.25s ease-in forwards;
         pointer-events: none;
         overflow: hidden;
+      }
+      .item-row.pending .name {
+        opacity: 0.55;
+      }
+      .item-row.pending .checkbox,
+      .item-row.pending .category-btn,
+      .item-row.pending .delete-btn {
+        opacity: 0.4;
+        pointer-events: none;
       }
       .item-row:hover {
         background: var(--secondary-background-color, rgba(0,0,0,0.04));
@@ -912,6 +1265,127 @@ class GroupedShoppingListCard extends HTMLElement {
       .add-item-row.categorizing .categorizing-indicator {
         display: block;
       }
+      /* Per-row category button */
+      .item-row .category-btn {
+        flex-shrink: 0;
+        width: 32px;
+        height: 32px;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        line-height: 1;
+        padding: 0;
+        opacity: 0.7;
+        transition: opacity 0.15s, background-color 0.15s;
+        color: var(--secondary-text-color);
+      }
+      .item-row .category-btn:hover {
+        opacity: 1;
+        background: var(--divider-color, rgba(0,0,0,0.08));
+      }
+      /* Inline category picker */
+      .category-picker {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px 16px 12px;
+        background: var(--secondary-background-color, rgba(0,0,0,0.03));
+        animation: fadeSlideIn 0.18s ease-out;
+      }
+      .category-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px 4px 8px;
+        border-radius: 14px;
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.12));
+        background: var(--card-background-color, var(--ha-card-background, #fff));
+        color: var(--primary-text-color);
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+        font-family: inherit;
+      }
+      .category-chip:hover {
+        background: var(--divider-color, rgba(0,0,0,0.08));
+        border-color: var(--primary-color);
+      }
+      .category-chip.active {
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
+        border-color: var(--primary-color);
+      }
+      .category-chip.remove {
+        color: var(--error-color, #db4437);
+      }
+      .category-chip.remove:hover {
+        background: var(--error-color, #db4437);
+        color: var(--text-primary-color, #fff);
+        border-color: var(--error-color, #db4437);
+      }
+      .category-chip .chip-emoji { font-size: 14px; }
+      .category-chip .chip-label { letter-spacing: 0.04em; }
+      /* Autocomplete suggestions */
+      .suggestions-panel {
+        margin: 0 16px 8px;
+        background: var(--card-background-color, var(--ha-card-background, #fff));
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.12));
+        border-radius: 10px;
+        max-height: 240px;
+        overflow-y: auto;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        animation: fadeSlideIn 0.15s ease-out;
+      }
+      .suggestions-panel[hidden] { display: none; }
+      .suggestion {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        padding: 9px 12px;
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid var(--divider-color, rgba(0,0,0,0.06));
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 14px;
+        text-align: left;
+        color: var(--primary-text-color);
+        transition: background-color 0.1s;
+      }
+      .suggestion:last-child { border-bottom: none; }
+      .suggestion:hover,
+      .suggestion.selected {
+        background: var(--secondary-background-color, rgba(0,0,0,0.05));
+      }
+      .suggestion .sug-emoji {
+        font-size: 16px;
+        flex-shrink: 0;
+        width: 20px;
+        text-align: center;
+      }
+      .suggestion .sug-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .suggestion .sug-tag {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--secondary-text-color);
+        background: var(--divider-color, rgba(0,0,0,0.08));
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
     `;
     shadow.appendChild(style);
 
@@ -971,27 +1445,70 @@ class GroupedShoppingListCard extends HTMLElement {
     this._addInput = document.createElement('ha-textfield');
     this._addInput.placeholder = '+ Add an item...';
 
-    this._addInput.addEventListener('focus', () => { this._inputFocused = true; });
+    this._addInput.addEventListener('focus', () => {
+      this._inputFocused = true;
+      clearTimeout(this._blurHideTimer);
+      const val = this._addInput.value;
+      if (val && val.trim()) {
+        this._suggestions = this._computeSuggestions(val);
+        this._selectedSuggestionIdx = -1;
+        this._renderSuggestions();
+      }
+    });
     this._addInput.addEventListener('blur', () => {
       this._inputFocused = false;
+      clearTimeout(this._blurHideTimer);
+      this._blurHideTimer = setTimeout(() => this._clearSuggestions(), 180);
       if (this._pendingRender) {
         this._pendingRender = false;
         this._renderItems();
       }
     });
 
+    this._addInput.addEventListener('input', () => {
+      const val = this._addInput.value;
+      this._suggestions = this._computeSuggestions(val);
+      this._selectedSuggestionIdx = -1;
+      this._renderSuggestions();
+    });
+
     this._addInput.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' && this._suggestions.length > 0) {
+        e.preventDefault();
+        this._selectedSuggestionIdx = (this._selectedSuggestionIdx + 1) % this._suggestions.length;
+        this._renderSuggestions();
+        return;
+      }
+      if (e.key === 'ArrowUp' && this._suggestions.length > 0) {
+        e.preventDefault();
+        this._selectedSuggestionIdx = this._selectedSuggestionIdx <= 0
+          ? this._suggestions.length - 1
+          : this._selectedSuggestionIdx - 1;
+        this._renderSuggestions();
+        return;
+      }
       if (e.key === 'Enter') {
         e.preventDefault();
-        const val = this._addInput.value;
-        this._addItem(val);
-        this._addInput.value = '';
-        this._addInput.focus();
+        let val = this._addInput.value;
+        if (this._selectedSuggestionIdx >= 0 && this._suggestions[this._selectedSuggestionIdx]) {
+          val = this._suggestions[this._selectedSuggestionIdx].name;
+        }
+        if (val.trim()) {
+          this._addInput.value = '';
+          this._clearSuggestions();
+          this._addItem(val);
+          this._addInput.focus();
+        }
+        return;
       }
       if (e.key === 'Escape') {
         e.preventDefault();
-        this._addInput.value = '';
-        this._addInput.blur();
+        if (this._suggestions.length > 0) {
+          this._clearSuggestions();
+        } else {
+          this._addInput.value = '';
+          this._addInput.blur();
+        }
       }
     });
     addRow.appendChild(this._addInput);
@@ -1000,6 +1517,14 @@ class GroupedShoppingListCard extends HTMLElement {
     catIndicator.textContent = 'Categorizing...';
     addRow.appendChild(catIndicator);
     card.appendChild(addRow);
+
+    // Autocomplete suggestions panel (flows below input)
+    this._suggestionsPanel = document.createElement('div');
+    this._suggestionsPanel.className = 'suggestions-panel';
+    this._suggestionsPanel.hidden = true;
+    // Don't let mousedown anywhere on the panel blur the input
+    this._suggestionsPanel.addEventListener('mousedown', (e) => e.preventDefault());
+    card.appendChild(this._suggestionsPanel);
 
     // Items container — diffed on updates, never torn down
     this._itemsContainer = document.createElement('div');
@@ -1027,6 +1552,7 @@ class GroupedShoppingListCard extends HTMLElement {
     const completed = [];
 
     for (const item of this._items) {
+      if (item._pendingDelete) continue;
       if (item.status === 'completed') {
         completed.push(item);
       } else {
@@ -1066,21 +1592,24 @@ class GroupedShoppingListCard extends HTMLElement {
       desired.push({ key: 'empty', type: 'empty' });
     }
 
+    const pushItem = (item) => {
+      desired.push({ key: `item:${item.uid}`, type: 'item', item, completed: false });
+      if (this._openPickerUid === item.uid) {
+        desired.push({ key: `picker:${item.uid}`, type: 'picker', item });
+      }
+    };
+
     // Uncategorized first
     if (uncategorized.length > 0) {
       desired.push({ key: 'cat:UNCATEGORIZED', type: 'category', emoji: UNCATEGORIZED_EMOJI, label: UNCATEGORIZED_LABEL, showCategorizeBtn: true });
-      for (const item of uncategorized) {
-        desired.push({ key: `item:${item.uid}`, type: 'item', item, completed: false });
-      }
+      for (const item of uncategorized) pushItem(item);
     }
 
     // Categorized groups
     for (const cat of orderedCategories) {
       const emoji = CATEGORY_EMOJI[cat] || '📦';
       desired.push({ key: `cat:${cat}`, type: 'category', emoji, label: cat });
-      for (const item of groups[cat]) {
-        desired.push({ key: `item:${item.uid}`, type: 'item', item, completed: false });
-      }
+      for (const item of groups[cat]) pushItem(item);
     }
 
     // Completed section
@@ -1162,6 +1691,9 @@ class GroupedShoppingListCard extends HTMLElement {
       case 'completed-section':
         node = this._createCompletedSection(desc.items);
         break;
+      case 'picker':
+        node = this._createPicker(desc.item);
+        break;
       case 'bottom-pad':
         node = document.createElement('div');
         node.className = 'bottom-pad';
@@ -1212,7 +1744,7 @@ class GroupedShoppingListCard extends HTMLElement {
 
   _createItemRow(item, isCompleted) {
     const row = document.createElement('div');
-    row.className = 'item-row';
+    row.className = 'item-row' + (item._pending ? ' pending' : '');
     // Store item data on the element so event handlers always read current values
     row._itemUid = item.uid;
     row._itemStatus = item.status;
@@ -1227,6 +1759,21 @@ class GroupedShoppingListCard extends HTMLElement {
     name.className = 'name' + (isCompleted ? ' completed' : '');
     name.textContent = item.displayName;
     row.appendChild(name);
+
+    if (!isCompleted) {
+      const catBtn = document.createElement('button');
+      catBtn.className = 'category-btn';
+      const parsed = parseItem(item.summary);
+      catBtn.textContent = parsed.category
+        ? (CATEGORY_EMOJI[parsed.category] || '📦')
+        : UNCATEGORIZED_EMOJI;
+      catBtn.title = parsed.category ? `Category: ${parsed.category} — tap to change` : 'Set category';
+      catBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._openPicker(row._itemUid);
+      });
+      row.appendChild(catBtn);
+    }
 
     const delBtn = document.createElement('button');
     delBtn.className = 'delete-btn';
@@ -1244,6 +1791,7 @@ class GroupedShoppingListCard extends HTMLElement {
   _updateItemRow(row, item, isCompleted) {
     row._itemUid = item.uid;
     row._itemStatus = item.status;
+    row.classList.toggle('pending', !!item._pending);
 
     const checkbox = row.querySelector('.checkbox');
     if (checkbox) checkbox.classList.toggle('checked', isCompleted);
@@ -1253,6 +1801,60 @@ class GroupedShoppingListCard extends HTMLElement {
       name.textContent = item.displayName;
       name.classList.toggle('completed', isCompleted);
     }
+
+    const catBtn = row.querySelector('.category-btn');
+    if (catBtn && !isCompleted) {
+      const parsed = parseItem(item.summary);
+      catBtn.textContent = parsed.category
+        ? (CATEGORY_EMOJI[parsed.category] || '📦')
+        : UNCATEGORIZED_EMOJI;
+      catBtn.title = parsed.category ? `Category: ${parsed.category} — tap to change` : 'Set category';
+    }
+  }
+
+  _createPicker(item) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'category-picker';
+    const parsed = parseItem(item.summary);
+    const currentCat = parsed.category;
+
+    for (const cat of this._getCategoryOrder()) {
+      const chip = document.createElement('button');
+      chip.className = 'category-chip' + (cat === currentCat ? ' active' : '');
+      const emojiSpan = document.createElement('span');
+      emojiSpan.className = 'chip-emoji';
+      emojiSpan.textContent = CATEGORY_EMOJI[cat] || '📦';
+      chip.appendChild(emojiSpan);
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'chip-label';
+      labelSpan.textContent = cat;
+      chip.appendChild(labelSpan);
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._setItemCategory(item.uid, cat);
+      });
+      wrapper.appendChild(chip);
+    }
+
+    if (currentCat) {
+      const chip = document.createElement('button');
+      chip.className = 'category-chip remove';
+      const emojiSpan = document.createElement('span');
+      emojiSpan.className = 'chip-emoji';
+      emojiSpan.textContent = '✕';
+      chip.appendChild(emojiSpan);
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'chip-label';
+      labelSpan.textContent = 'Remove';
+      chip.appendChild(labelSpan);
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._setItemCategory(item.uid, null);
+      });
+      wrapper.appendChild(chip);
+    }
+
+    return wrapper;
   }
 
   _createCompletedHeader(count) {
@@ -1353,6 +1955,11 @@ class GroupedShoppingListCard extends HTMLElement {
 
   disconnectedCallback() {
     clearTimeout(this._debounceTimer);
+    clearTimeout(this._blurHideTimer);
+    if (this._docClickHandler) {
+      document.removeEventListener('click', this._docClickHandler, true);
+      this._docClickHandler = null;
+    }
   }
 
   getCardSize() {
