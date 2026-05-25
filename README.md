@@ -26,6 +26,9 @@ A custom Lovelace card for Home Assistant that automatically organizes your shop
 - AI-powered categorization for unknown items via Home Assistant's `ai_task` service
 - "Categorize All" button for bulk categorization
 - **Safe sorting** — the sort and categorize actions rename items in place and match AI results by name; an item the AI can't place stays uncategorized and is never deleted
+- **Duplicate-aware adds** — adding an item already on the list points you to the existing one (with a pulse) instead of making a copy; if it's already checked off, it comes back onto the list
+- **Larger touch targets on mobile** — bigger checkbox and buttons on touch devices
+- **Remembers the completed section** — collapsed/expanded state persists across reloads
 - Configurable category display order
 - Smooth updates with DOM diffing (no full re-renders)
 - iOS keyboard fix — input stays focused during state updates and while picking suggestions

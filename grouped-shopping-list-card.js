@@ -5,7 +5,7 @@
  * dismiss the keyboard on every hass update.
  */
 
-const CARD_VERSION = '1.4.0';
+const CARD_VERSION = '1.5.0';
 console.info(
   `%c GROUPED-SHOPPING-LIST-CARD %c v${CARD_VERSION} `,
   'color: white; background: #555; font-weight: bold; padding: 2px 4px;',
@@ -355,6 +355,7 @@ class GroupedShoppingListCard extends HTMLElement {
     if (!this._initialFetchDone) {
       this._initialFetchDone = true;
       this._loadHistory();
+      this._loadCollapsedState();
       this._loadItemsCache();
       // Paint the shell (and any cached items) immediately so the user doesn't
       // stare at an empty card during the WS round-trip.
@@ -475,9 +476,47 @@ class GroupedShoppingListCard extends HTMLElement {
     );
   }
 
+  /** Find an existing item (active or completed) whose name matches `name`,
+   *  ignoring case and any [CATEGORY] prefix. Returns the item or null. */
+  _findDuplicate(name) {
+    const key = parseItem(name).name.toLowerCase().trim();
+    if (!key) return null;
+    return this._items.find(i =>
+      !i._pendingDelete &&
+      !i.uid.startsWith('tmp-') &&
+      parseItem(i.summary).name.toLowerCase().trim() === key) || null;
+  }
+
+  /** Briefly highlight an existing row and scroll it into view. */
+  _pulseRow(uid) {
+    const row = this._itemsContainer?.querySelector(`[data-key="item:${uid}"]`);
+    if (!row) return;
+    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    row.classList.remove('pulse');
+    // reflow so re-adding the class restarts the animation
+    void row.offsetWidth;
+    row.classList.add('pulse');
+    row.addEventListener('animationend', () => row.classList.remove('pulse'), { once: true });
+  }
+
   async _addItem(name) {
     if (!name.trim()) return;
     const trimmed = name.trim();
+
+    // Duplicate handling: don't silently create a second copy.
+    const dup = this._findDuplicate(trimmed);
+    if (dup) {
+      const displayName = parseItem(dup.summary).name;
+      if (dup.status === 'completed') {
+        // Already bought/checked — bring it back instead of duplicating.
+        this._toggleItem(dup.uid, 'completed');
+        this._showToast(`Moved ${displayName} back to your list`, { duration: 3000 });
+      } else {
+        this._showToast(`${displayName} is already on your list`, { duration: 3000 });
+        this._pulseRow(dup.uid);
+      }
+      return;
+    }
 
     // Optimistic insert with a temp uid
     const optimistic = {
@@ -751,6 +790,27 @@ class GroupedShoppingListCard extends HTMLElement {
       console.error('grouped-shopping-list-card: Failed to delete item', e);
       delete item._pendingDelete;
       this._renderItems();
+    }
+  }
+
+  _collapsedKey() {
+    return 'gslc_completed_collapsed_' + (this._config.entity || 'default');
+  }
+
+  _loadCollapsedState() {
+    try {
+      const raw = localStorage.getItem(this._collapsedKey());
+      if (raw !== null) this._completedCollapsed = JSON.parse(raw) === true;
+    } catch (e) {
+      // ignore — keep default
+    }
+  }
+
+  _saveCollapsedState() {
+    try {
+      localStorage.setItem(this._collapsedKey(), JSON.stringify(this._completedCollapsed));
+    } catch (e) {
+      // storage disabled; non-fatal
     }
   }
 
@@ -1085,9 +1145,12 @@ class GroupedShoppingListCard extends HTMLElement {
     }
   }
 
-  _showUndoToast(items, label) {
-    if (!items || !items.length) return;
-    // Replace any existing toast
+  /**
+   * Show a bottom snackbar. With { actionLabel, onAction } it renders a button;
+   * otherwise it's a plain auto-dismissing message. Always replaces any toast
+   * currently on screen.
+   */
+  _showToast(label, { actionLabel, onAction, duration = 5000 } = {}) {
     if (this._pendingUndo) {
       clearTimeout(this._pendingUndo.timer);
       this._pendingUndo.toastEl?.remove();
@@ -1101,25 +1164,33 @@ class GroupedShoppingListCard extends HTMLElement {
     msg.textContent = label;
     toast.appendChild(msg);
 
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'toast-btn';
-    btn.textContent = 'Undo';
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this._performUndo();
-    });
-    toast.appendChild(btn);
+    if (actionLabel && onAction) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'toast-btn';
+      btn.textContent = actionLabel;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onAction();
+      });
+      toast.appendChild(btn);
+    }
 
     this.shadowRoot.appendChild(toast);
     const timer = setTimeout(() => {
       toast.classList.add('hiding');
-      setTimeout(() => {
-        if (toast.parentNode) toast.remove();
-      }, 250);
+      setTimeout(() => { if (toast.parentNode) toast.remove(); }, 250);
       if (this._pendingUndo?.toastEl === toast) this._pendingUndo = null;
-    }, 5000);
-    this._pendingUndo = { items, timer, toastEl: toast };
+    }, duration);
+    this._pendingUndo = { items: null, timer, toastEl: toast };
+    return toast;
+  }
+
+  _showUndoToast(items, label) {
+    if (!items || !items.length) return;
+    this._showToast(label, { actionLabel: 'Undo', onAction: () => this._performUndo() });
+    // _showToast set _pendingUndo with items:null — attach the undo payload.
+    if (this._pendingUndo) this._pendingUndo.items = items;
   }
 
   _performUndo() {
@@ -1284,6 +1355,14 @@ class GroupedShoppingListCard extends HTMLElement {
       .items-container.no-anim .item-row {
         animation: none;
       }
+      @keyframes rowPulse {
+        0%, 100% { background: transparent; }
+        25%, 60% { background: rgba(var(--rgb-primary-color, 3,169,244), 0.28); }
+      }
+      .item-row.pulse {
+        animation: rowPulse 0.7s ease-in-out 2;
+        border-radius: 6px;
+      }
       .item-row.pending .name {
         opacity: 0.55;
         pointer-events: none;
@@ -1438,6 +1517,31 @@ class GroupedShoppingListCard extends HTMLElement {
       @media (hover: none) {
         .item-row .delete-btn {
           opacity: 0.5;
+        }
+        /* Roomier hit areas on touch devices (mouse/desktop sizes unchanged) */
+        .item-row {
+          padding-top: 8px;
+          padding-bottom: 8px;
+        }
+        .item-row .checkbox {
+          width: 26px;
+          height: 26px;
+        }
+        .item-row .checkbox svg {
+          width: 18px;
+          height: 18px;
+        }
+        .item-row .delete-btn,
+        .item-row .category-btn {
+          width: 40px;
+          height: 40px;
+        }
+        .item-row .category-btn {
+          font-size: 18px;
+        }
+        .header-btn {
+          width: 38px;
+          height: 38px;
         }
       }
       /* Header action buttons */
@@ -2307,6 +2411,7 @@ class GroupedShoppingListCard extends HTMLElement {
     // section DOM node was removed and recreated between renders.
     header.addEventListener('click', () => {
       this._completedCollapsed = !this._completedCollapsed;
+      this._saveCollapsedState();
       const chev = header.querySelector('.chevron');
       const section = this._itemsContainer.querySelector('[data-key="completed-section"]');
       if (chev) chev.classList.toggle('collapsed', this._completedCollapsed);
