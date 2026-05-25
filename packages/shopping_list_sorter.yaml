@@ -15,7 +15,10 @@
 automation:
   - id: sort_shopping_list_button
     alias: Sort Shopping List (Button)
-    description: Sort shopping list by category when button is pressed
+    description: >
+      Categorize uncategorized shopping list items in place when the button is
+      pressed. NEVER clears the list — items the AI can't place stay
+      uncategorized, so nothing is ever lost.
     mode: single
     max_exceeded: silent
 
@@ -24,7 +27,7 @@ automation:
         entity_id: input_button.sort_shopping_list_button
 
     action:
-      # Get current shopping list items
+      # Get current (incomplete) shopping list items
       - service: todo.get_items
         target:
           entity_id: todo.shopping_list
@@ -32,64 +35,73 @@ automation:
         data:
           status: needs_action
 
-      # Only sort if we have items
-      - condition: template
-        value_template: "{{ current_items['todo.shopping_list']['items'] | length > 0 }}"
+      # Only the uncategorized ones (summary not already prefixed with [CATEGORY])
+      - variables:
+          uncategorized: >
+            {{ current_items['todo.shopping_list']['items']
+               | map(attribute='summary')
+               | reject('match', '^\\[')
+               | list }}
 
-      # Use AI to categorize items
+      # Nothing to do if everything is already categorized
+      - condition: template
+        value_template: "{{ uncategorized | length > 0 }}"
+
+      # Ask the AI to categorize ONLY the uncategorized items, keeping names identical
       - action: ai_task.generate_data
         data:
           task_name: "sort_shopping_list"
           instructions: |
-            Sort these shopping items into categories and format each item with its category prefix.
+            Categorize each shopping item into exactly one of these categories:
+            PRODUCE, MEAT, DAIRY, FROZEN, BAKERY, PANTRY, BEVERAGES, SNACKS, HEALTH, HOUSEHOLD, OTHER
 
-            Categories: PRODUCE, MEAT, DAIRY, FROZEN, BAKERY, PANTRY, BEVERAGES, SNACKS, HEALTH, HOUSEHOLD, OTHER
+            Return ONE line per input item, formatted exactly as:
+            [CATEGORY] item name
 
-            Format each item as: [CATEGORY] item name
+            Keep each item name IDENTICAL to the input (same spelling, same words).
+            Do not add, drop, merge, or rename items.
 
-            Example output:
-            [PRODUCE] apples
-            [PRODUCE] bananas
-            [DAIRY] milk
-            [DAIRY] cheese
-            [MEAT] chicken
-            [BAKERY] bread
-
-            Return ONLY the formatted items, one per line, grouped by category.
-
-            Items to sort: {{ current_items['todo.shopping_list']['items'] | map(attribute='summary') | join(', ') }}
+            Items:
+            {{ uncategorized | join('\n') }}
         response_variable: sorted_list
         continue_on_error: true
 
-      # Process if successful
+      # Only proceed when the AI returned usable, non-empty output
       - choose:
           - conditions:
               - condition: template
-                value_template: "{{ sorted_list is defined and sorted_list.data is defined }}"
+                value_template: >
+                  {{ sorted_list is defined
+                     and sorted_list.data is defined
+                     and (sorted_list.data | trim) != '' }}
             sequence:
-              # Clear and re-add items
-              - service: shopping_list.complete_all
-              - delay:
-                  milliseconds: 500
-              - service: shopping_list.clear_completed_items
-
-              # Parse AI response and add back sorted with prefixes
+              # Rename each matched item IN PLACE. We never clear the list, so an
+              # item the AI omits or renames beyond recognition simply stays as-is.
               - variables:
-                  lines: "{{ sorted_list.data.split('\n') }}"
+                  lines: >
+                    {{ sorted_list.data.split('\n')
+                       | map('trim')
+                       | select('match', '^\\[')
+                       | list }}
               - repeat:
                   for_each: "{{ lines }}"
                   sequence:
+                    - variables:
+                        # Everything after the first "] " is the (unchanged) item name,
+                        # which is what the item is currently called on the list.
+                        oldname: "{{ (repeat.item.split('] ')[1:] | join('] ')) | trim }}"
                     - choose:
-                        # Skip empty lines
                         - conditions:
                             - condition: template
-                              value_template: "{{ repeat.item | trim == '' }}"
-                          sequence: []
-                      # Add all non-empty lines as items
-                      default:
-                        - service: shopping_list.add_item
-                          data:
-                            name: "{{ repeat.item | trim }}"
+                              value_template: "{{ oldname != '' }}"
+                          sequence:
+                            - service: todo.update_item
+                              target:
+                                entity_id: todo.shopping_list
+                              data:
+                                item: "{{ oldname }}"
+                                rename: "{{ repeat.item | trim }}"
+                              continue_on_error: true
 
   # Daily safety net: categorize any uncategorized items (e.g. added via voice/app)
   - id: sort_shopping_list_daily

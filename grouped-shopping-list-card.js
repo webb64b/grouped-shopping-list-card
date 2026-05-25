@@ -5,7 +5,7 @@
  * dismiss the keyboard on every hass update.
  */
 
-const CARD_VERSION = '1.3.0';
+const CARD_VERSION = '1.4.0';
 console.info(
   `%c GROUPED-SHOPPING-LIST-CARD %c v${CARD_VERSION} `,
   'color: white; background: #555; font-weight: bold; padding: 2px 4px;',
@@ -378,7 +378,9 @@ class GroupedShoppingListCard extends HTMLElement {
       if (this._autoSortBtn && this._autoSortBtn._lastState !== aState) {
         this._autoSortBtn._lastState = aState;
         this._autoSortBtn.classList.toggle('active', aState === 'on');
-        this._autoSortBtn.title = aState === 'on' ? 'Auto-categorize: ON' : 'Auto-categorize: OFF';
+        this._autoSortBtn.title = aState === 'on'
+          ? 'Auto-categorize new items: ON — tap to turn off'
+          : 'Auto-categorize new items: OFF — tap to turn on';
       }
     }
   }
@@ -589,19 +591,10 @@ class GroupedShoppingListCard extends HTMLElement {
     this._isSorting = true;
     this._sortBtn.classList.add('sorting');
     try {
-      await this._hass.callService('input_button', 'press', {},
-        { entity_id: this._config.sort_button_entity });
-      // Automation clears list and re-adds. Poll until items come back categorized.
-      const start = Date.now();
-      let sawEmpty = false;
-      while (Date.now() - start < 15000) {
-        await new Promise(r => setTimeout(r, 500));
-        await this._fetchItems();
-        const active = this._items.filter(i => i.status !== 'completed');
-        if (active.length === 0) { sawEmpty = true; continue; }
-        if (sawEmpty) { await new Promise(r => setTimeout(r, 500)); await this._fetchItems(); break; }
-        if (active.every(i => parseItem(i.summary).category !== null)) break;
-      }
+      // Safe, in-place categorization — never clears the list. Unknown items
+      // simply stay uncategorized. (Previously this pressed an automation that
+      // cleared and re-added the list, which could permanently drop items.)
+      await this._categorizeUncategorizedItems();
     } catch (e) {
       console.error('grouped-shopping-list-card: Sort failed', e);
     } finally {
@@ -619,9 +612,24 @@ class GroupedShoppingListCard extends HTMLElement {
     }
   }
 
+  // ✨ button on the Uncategorized header — thin wrapper around the shared core.
   async _categorizeUncategorized(btn) {
     if (btn.classList.contains('working')) return;
     btn.classList.add('working');
+    try {
+      await this._categorizeUncategorizedItems();
+    } finally {
+      btn.classList.remove('working');
+    }
+  }
+
+  /**
+   * Categorize every uncategorized active item in place — local dictionary first,
+   * then AI for the rest. NEVER clears or re-adds: an item the AI can't place
+   * just stays uncategorized. AI output is matched back to items by name (not by
+   * position), so reordered/regrouped responses can't misassign categories.
+   */
+  async _categorizeUncategorizedItems() {
     try {
       const uncategorized = this._items.filter(i =>
         i.status !== 'completed' && parseItem(i.summary).category === null);
@@ -650,45 +658,51 @@ class GroupedShoppingListCard extends HTMLElement {
       this._renderItems();
 
       // Second pass: send remaining unknowns to AI (if any)
-      if (needsAI.length > 0) {
-        const aiItems = needsAI.filter(i => !i.uid.startsWith('tmp-'));
-        const names = aiItems.map(i => i.summary);
-        if (names.length > 0) {
-          const response = await this._hass.callWS({
-            type: 'call_service',
-            domain: 'ai_task',
-            service: 'generate_data',
-            service_data: {
-              task_name: 'categorize_items',
-              instructions: `Categorize these shopping items.\nCategories: ${this._getCategoryOrder().join(', ')}\n\nItems:\n${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}\n\nRespond with ONLY the categorized items, one per line:\n[CATEGORY] Item Name`,
-            },
-            return_response: true,
-          });
+      const aiItems = needsAI.filter(i => !i.uid.startsWith('tmp-'));
+      if (aiItems.length > 0) {
+        const names = aiItems.map(i => parseItem(i.summary).name);
+        const response = await this._hass.callWS({
+          type: 'call_service',
+          domain: 'ai_task',
+          service: 'generate_data',
+          service_data: {
+            task_name: 'categorize_items',
+            instructions: `Categorize these shopping items.\nCategories: ${this._getCategoryOrder().join(', ')}\n\nItems:\n${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}\n\nRespond with ONLY the categorized items, one per line, keeping each item name identical to the input:\n[CATEGORY] Item Name`,
+          },
+          return_response: true,
+        });
 
-          const text = response?.response?.data;
-          const lines = typeof text === 'string' ? text.trim().split('\n').filter(l => l.trim()) : [];
+        const text = response?.response?.data;
+        const lines = typeof text === 'string' ? text.trim().split('\n').filter(l => l.trim()) : [];
 
-          const aiRenamed = [];
-          for (let i = 0; i < Math.min(lines.length, aiItems.length); i++) {
-            const categorized = lines[i].trim();
-            if (parseItem(categorized).category) {
-              aiItems[i].summary = categorized;
-              aiItems[i]._pending = true;
-              aiRenamed.push(aiItems[i]);
-              await this._hass.callService('todo', 'update_item',
-                { item: aiItems[i].uid, rename: categorized },
-                { entity_id: this._config.entity });
-            }
-          }
-          for (const item of aiRenamed) delete item._pending;
-          this._renderItems();
+        // Match AI output back to items by name, not position.
+        const byName = new Map();
+        for (const item of aiItems) {
+          byName.set(parseItem(item.summary).name.toLowerCase().trim(), item);
         }
+
+        const aiRenamed = [];
+        for (const line of lines) {
+          const parsedLine = parseItem(line.trim());
+          if (!parsedLine.category) continue;
+          const key = parsedLine.name.toLowerCase().trim();
+          const target = byName.get(key);
+          if (!target || target._matched) continue;
+          target._matched = true;
+          const renamed = `[${parsedLine.category}] ${parsedLine.name}`;
+          target.summary = renamed;
+          target._pending = true;
+          aiRenamed.push(target);
+          await this._hass.callService('todo', 'update_item',
+            { item: target.uid, rename: renamed },
+            { entity_id: this._config.entity });
+        }
+        for (const item of aiRenamed) { delete item._pending; delete item._matched; }
+        this._renderItems();
       }
       this._debouncedFetch();
     } catch (e) {
       console.error('grouped-shopping-list-card: Categorize uncategorized failed', e);
-    } finally {
-      btn.classList.remove('working');
     }
   }
 
@@ -1453,8 +1467,14 @@ class GroupedShoppingListCard extends HTMLElement {
         opacity: 1;
       }
       .header-btn.active {
-        color: var(--primary-color);
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
         opacity: 1;
+      }
+      .header-btn.active:hover {
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
+        opacity: 0.9;
       }
       .header-btn svg {
         width: 20px;
@@ -1725,7 +1745,7 @@ class GroupedShoppingListCard extends HTMLElement {
     // Sort button (Feature 1)
     this._sortBtn = document.createElement('button');
     this._sortBtn.className = 'header-btn';
-    this._sortBtn.title = 'Sort & categorize all items';
+    this._sortBtn.title = 'Categorize uncategorized items now';
     this._sortBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 18h6v-2H3v2zM3 6v2h18V6H3zm0 7h12v-2H3v2z"/></svg>';
     this._sortBtn.addEventListener('click', (e) => { e.stopPropagation(); this._triggerSort(); });
     actions.appendChild(this._sortBtn);
@@ -1739,9 +1759,11 @@ class GroupedShoppingListCard extends HTMLElement {
       const isOn = this._hass.states[autoSortEntity].state === 'on';
       this._autoSortBtn.classList.toggle('active', isOn);
       this._autoSortBtn._lastState = this._hass.states[autoSortEntity].state;
-      this._autoSortBtn.title = isOn ? 'Auto-categorize: ON' : 'Auto-categorize: OFF';
+      this._autoSortBtn.title = isOn
+        ? 'Auto-categorize new items: ON — tap to turn off'
+        : 'Auto-categorize new items: OFF — tap to turn on';
     } else {
-      this._autoSortBtn.title = 'Auto-categorize';
+      this._autoSortBtn.title = 'Auto-categorize new items';
     }
     this._autoSortBtn.addEventListener('click', (e) => { e.stopPropagation(); this._toggleAutoSort(); });
     actions.appendChild(this._autoSortBtn);

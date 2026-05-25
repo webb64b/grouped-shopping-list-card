@@ -25,6 +25,7 @@ A custom Lovelace card for Home Assistant that automatically organizes your shop
 - Built-in lookup table (~400 common grocery items) for instant categorization
 - AI-powered categorization for unknown items via Home Assistant's `ai_task` service
 - "Categorize All" button for bulk categorization
+- **Safe sorting** — the sort and categorize actions rename items in place and match AI results by name; an item the AI can't place stays uncategorized and is never deleted
 - Configurable category display order
 - Smooth updates with DOM diffing (no full re-renders)
 - iOS keyboard fix — input stays focused during state updates and while picking suggestions
@@ -158,10 +159,10 @@ The `shopping_list_sorter.yaml` package provides:
 
 | Component | What it does |
 |-----------|-------------|
-| `input_button.sort_shopping_list_button` | Triggers a full-list AI re-sort when pressed |
+| `input_button.sort_shopping_list_button` | Triggers an AI categorize-in-place of uncategorized items when pressed |
 | `input_boolean.auto_sort_shopping_list` | When ON, new items are auto-categorized on add |
-| `automation.sort_shopping_list_button` | Clears the list and re-adds all items in sorted category order |
-| `automation.sort_shopping_list_daily` | At 9 AM, checks for uncategorized items and sorts if found |
+| `automation.sort_shopping_list_button` | Categorizes uncategorized items **in place** (renames via `todo.update_item`) — never clears the list, so items the AI can't place stay uncategorized and are never lost |
+| `automation.sort_shopping_list_daily` | At 9 AM, checks for uncategorized items and categorizes them if found |
 | `script.add_items_to_shopping_list` | Add multiple comma-separated items via one service call |
 | `script.sort_shopping_list_alphabetical` | Simple alphabetical sort (no AI) |
 
