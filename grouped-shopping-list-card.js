@@ -5,7 +5,7 @@
  * dismiss the keyboard on every hass update.
  */
 
-const CARD_VERSION = '1.2.0';
+const CARD_VERSION = '1.3.0';
 console.info(
   `%c GROUPED-SHOPPING-LIST-CARD %c v${CARD_VERSION} `,
   'color: white; background: #555; font-weight: bold; padding: 2px 4px;',
@@ -306,6 +306,9 @@ class GroupedShoppingListCard extends HTMLElement {
     this._blurHideTimer = null;
     // Undo toast state
     this._pendingUndo = null;
+    // Load-speed state
+    this._firstFetchDone = false;
+    this._initialItemsRendered = false;
   }
 
   static getConfigElement() {
@@ -332,6 +335,8 @@ class GroupedShoppingListCard extends HTMLElement {
     this._initialFetchDone = false;
     this._suggestionsLoaded = false;
     this._history = {};
+    this._firstFetchDone = false;
+    this._initialItemsRendered = false;
   }
 
   _getCategoryOrder() {
@@ -350,6 +355,10 @@ class GroupedShoppingListCard extends HTMLElement {
     if (!this._initialFetchDone) {
       this._initialFetchDone = true;
       this._loadHistory();
+      this._loadItemsCache();
+      // Paint the shell (and any cached items) immediately so the user doesn't
+      // stare at an empty card during the WS round-trip.
+      this._renderItems();
       this._fetchItems();
       return;
     }
@@ -390,10 +399,13 @@ class GroupedShoppingListCard extends HTMLElement {
       serverItems = result.items || [];
     } catch (e) {
       console.error('grouped-shopping-list-card: Failed to fetch items', e);
+      this._firstFetchDone = true;
       return;
     }
     this._items = this._reconcile(this._items, serverItems);
+    this._firstFetchDone = true;
     this._renderItems();
+    this._saveItemsCache();
   }
 
   /**
@@ -725,6 +737,38 @@ class GroupedShoppingListCard extends HTMLElement {
       console.error('grouped-shopping-list-card: Failed to delete item', e);
       delete item._pendingDelete;
       this._renderItems();
+    }
+  }
+
+  _itemsCacheKey() {
+    return 'gslc_items_' + (this._config.entity || 'default');
+  }
+
+  _loadItemsCache() {
+    try {
+      const raw = localStorage.getItem(this._itemsCacheKey());
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        // Only adopt minimal fields; drop any stale local flags
+        this._items = parsed
+          .filter(i => i && typeof i.uid === 'string' && !i.uid.startsWith('tmp-'))
+          .map(i => ({ uid: i.uid, summary: i.summary || '', status: i.status || 'needs_action' }));
+      }
+    } catch (e) {
+      // Corrupt cache; ignore
+    }
+  }
+
+  _saveItemsCache() {
+    try {
+      const clean = this._items
+        .filter(i => !i.uid.startsWith('tmp-') && !i._pending && !i._pendingDelete)
+        .slice(0, 200)
+        .map(i => ({ uid: i.uid, summary: i.summary, status: i.status }));
+      localStorage.setItem(this._itemsCacheKey(), JSON.stringify(clean));
+    } catch (e) {
+      // Quota / disabled storage; non-fatal
     }
   }
 
@@ -1222,6 +1266,9 @@ class GroupedShoppingListCard extends HTMLElement {
         animation: fadeSlideOut 0.25s ease-in forwards;
         pointer-events: none;
         overflow: hidden;
+      }
+      .items-container.no-anim .item-row {
+        animation: none;
       }
       .item-row.pending .name {
         opacity: 0.55;
@@ -1846,6 +1893,7 @@ class GroupedShoppingListCard extends HTMLElement {
 
     // Items container — diffed on updates, never torn down
     this._itemsContainer = document.createElement('div');
+    this._itemsContainer.className = 'items-container';
     card.appendChild(this._itemsContainer);
 
     shadow.appendChild(card);
@@ -1878,8 +1926,16 @@ class GroupedShoppingListCard extends HTMLElement {
       }
     }
 
-    // Update count badge (outside items container — always safe)
-    this._countBadge.textContent = active.length;
+    // Update count badge. Before the first fetch lands, prefer the HA entity
+    // state (it's the active-item count) so the badge isn't briefly "0" when
+    // the list actually has items but cache is empty.
+    let countText = active.length;
+    if (!this._firstFetchDone && active.length === 0 && this._hass) {
+      const st = this._hass.states[this._config.entity]?.state;
+      const n = parseInt(st, 10);
+      if (Number.isFinite(n) && n > 0) countText = n;
+    }
+    this._countBadge.textContent = countText;
 
     // Group active items by category
     const groups = {};
@@ -1906,7 +1962,7 @@ class GroupedShoppingListCard extends HTMLElement {
     // Build desired element descriptors (keyed for diffing)
     const desired = [];
 
-    if (active.length === 0 && completed.length === 0) {
+    if (active.length === 0 && completed.length === 0 && this._firstFetchDone) {
       desired.push({ key: 'empty', type: 'empty' });
     }
 
@@ -1939,7 +1995,16 @@ class GroupedShoppingListCard extends HTMLElement {
     // Bottom padding
     desired.push({ key: 'bottom-pad', type: 'bottom-pad' });
 
+    // Suppress fadeSlideIn for the very first paint that has items, so 30
+    // rows don't animate in concurrently on initial load.
+    const skipAnim = !this._initialItemsRendered;
+    if (skipAnim) this._itemsContainer.classList.add('no-anim');
     this._diffChildren(this._itemsContainer, desired);
+    if (skipAnim && (active.length || completed.length)) {
+      this._initialItemsRendered = true;
+      // Re-enable animations after this paint commits, so subsequent adds animate.
+      requestAnimationFrame(() => this._itemsContainer.classList.remove('no-anim'));
+    }
   }
 
   /**
