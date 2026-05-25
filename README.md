@@ -17,6 +17,9 @@ A custom Lovelace card for Home Assistant that automatically organizes your shop
 - **Optimistic updates** — every interaction (add, check, delete, recategorize) reflects immediately in the UI; the card reconciles with Home Assistant in the background
 - **Autocomplete dropdown** — as you type, suggestions appear from the built-in 400-item dictionary plus your own add history (per-entity, persisted in `localStorage`); arrow keys + Enter to accept
 - **Per-item category picker** — tap the category emoji on any row to open a chip picker and reassign or clear the category
+- **Edit in place** — tap an item's name to rename it without losing its category
+- **Sticky add-bar** — the input and "+" button stay pinned at the top while you scroll a long list
+- **Undo toast** — after deleting an item (or clearing completed), a 5-second snackbar lets you bring it back
 - Collapsible completed items section with "clear all" button
 - Built-in lookup table (~400 common grocery items) for instant categorization
 - AI-powered categorization for unknown items via Home Assistant's `ai_task` service

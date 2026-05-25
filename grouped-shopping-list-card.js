@@ -5,7 +5,7 @@
  * dismiss the keyboard on every hass update.
  */
 
-const CARD_VERSION = '1.1.2';
+const CARD_VERSION = '1.2.0';
 console.info(
   `%c GROUPED-SHOPPING-LIST-CARD %c v${CARD_VERSION} `,
   'color: white; background: #555; font-weight: bold; padding: 2px 4px;',
@@ -304,6 +304,8 @@ class GroupedShoppingListCard extends HTMLElement {
     this._suggestions = [];
     this._selectedSuggestionIdx = -1;
     this._blurHideTimer = null;
+    // Undo toast state
+    this._pendingUndo = null;
   }
 
   static getConfigElement() {
@@ -707,6 +709,7 @@ class GroupedShoppingListCard extends HTMLElement {
     const item = this._items.find(i => i.uid === uid);
     if (!item) return;
     if (uid.startsWith('tmp-')) return; // wait for reconciliation
+    const snapshot = { summary: item.summary, status: item.status };
     item._pendingDelete = true;
     this._renderItems();
     try {
@@ -716,6 +719,8 @@ class GroupedShoppingListCard extends HTMLElement {
       );
       this._items = this._items.filter(i => i.uid !== uid);
       this._debouncedFetch();
+      const shortName = parseItem(snapshot.summary).name || snapshot.summary;
+      this._showUndoToast([snapshot], `Deleted: ${shortName}`);
     } catch (e) {
       console.error('grouped-shopping-list-card: Failed to delete item', e);
       delete item._pendingDelete;
@@ -883,6 +888,88 @@ class GroupedShoppingListCard extends HTMLElement {
     this._renderItems();
   }
 
+  _startEditingRow(row, item) {
+    if (row.dataset.editing === 'true') return;
+    const parsed = parseItem(item.summary);
+    const currentName = parsed.name;
+    const nameEl = row.querySelector('.name');
+    if (!nameEl || nameEl.tagName === 'INPUT') return;
+
+    row.dataset.editing = 'true';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'name name-edit';
+    input.value = currentName;
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+
+    nameEl.replaceWith(input);
+    // Defer focus/select to next frame so iOS reliably opens the keyboard
+    requestAnimationFrame(() => {
+      input.focus();
+      input.select();
+    });
+
+    let settled = false;
+    const finish = (commit) => {
+      if (settled) return;
+      settled = true;
+      row.dataset.editing = 'false';
+      const newName = input.value.trim();
+      const changed = commit && newName && newName !== currentName;
+      // Restore the span (use current item summary in case it was updated mid-edit)
+      const liveItem = this._items.find(i => i.uid === row._itemUid);
+      const span = document.createElement('span');
+      span.className = nameEl.className;
+      span.textContent = liveItem ? parseItem(liveItem.summary).name : currentName;
+      span.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (row.dataset.editing === 'true') return;
+        const li = this._items.find(i => i.uid === row._itemUid);
+        if (!li || li._pending || li._pendingDelete) return;
+        this._startEditingRow(row, li);
+      });
+      input.replaceWith(span);
+      if (changed) this._renameItem(row._itemUid, newName);
+    };
+
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  async _renameItem(uid, newName) {
+    const item = this._items.find(i => i.uid === uid);
+    if (!item) return;
+    const trimmed = (newName || '').trim();
+    if (!trimmed) return;
+    const parsed = parseItem(item.summary);
+    if (trimmed === parsed.name) return;
+    const newSummary = parsed.category ? `[${parsed.category}] ${trimmed}` : trimmed;
+    const prevSummary = item.summary;
+    item.summary = newSummary;
+    item._pending = true;
+    this._renderItems();
+    try {
+      await this._hass.callService('todo', 'update_item',
+        { item: uid, rename: newSummary },
+        { entity_id: this._config.entity });
+      delete item._pending;
+      this._renderItems();
+      this._debouncedFetch();
+    } catch (e) {
+      console.error('grouped-shopping-list-card: Rename failed', e);
+      item.summary = prevSummary;
+      delete item._pending;
+      this._renderItems();
+    }
+  }
+
   async _setItemCategory(uid, newCat) {
     const item = this._items.find(i => i.uid === uid);
     if (!item) return;
@@ -918,6 +1005,7 @@ class GroupedShoppingListCard extends HTMLElement {
       i.status === 'completed' && !i._pendingDelete && !i.uid.startsWith('tmp-'));
     if (!completedItems.length) return;
     const completedUids = completedItems.map(i => i.uid);
+    const snapshots = completedItems.map(i => ({ summary: i.summary, status: i.status }));
     for (const item of completedItems) item._pendingDelete = true;
     this._renderItems();
     try {
@@ -928,10 +1016,66 @@ class GroupedShoppingListCard extends HTMLElement {
       const uidSet = new Set(completedUids);
       this._items = this._items.filter(i => !uidSet.has(i.uid));
       this._debouncedFetch();
+      const label = snapshots.length === 1
+        ? `Cleared: ${parseItem(snapshots[0].summary).name || snapshots[0].summary}`
+        : `Cleared ${snapshots.length} items`;
+      this._showUndoToast(snapshots, label);
     } catch (e) {
       console.error('grouped-shopping-list-card: Failed to clear completed items', e);
       for (const item of completedItems) delete item._pendingDelete;
       this._renderItems();
+    }
+  }
+
+  _showUndoToast(items, label) {
+    if (!items || !items.length) return;
+    // Replace any existing toast
+    if (this._pendingUndo) {
+      clearTimeout(this._pendingUndo.timer);
+      this._pendingUndo.toastEl?.remove();
+      this._pendingUndo = null;
+    }
+    const toast = document.createElement('div');
+    toast.className = 'undo-toast';
+
+    const msg = document.createElement('span');
+    msg.className = 'toast-msg';
+    msg.textContent = label;
+    toast.appendChild(msg);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-btn';
+    btn.textContent = 'Undo';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._performUndo();
+    });
+    toast.appendChild(btn);
+
+    this.shadowRoot.appendChild(toast);
+    const timer = setTimeout(() => {
+      toast.classList.add('hiding');
+      setTimeout(() => {
+        if (toast.parentNode) toast.remove();
+      }, 250);
+      if (this._pendingUndo?.toastEl === toast) this._pendingUndo = null;
+    }, 5000);
+    this._pendingUndo = { items, timer, toastEl: toast };
+  }
+
+  _performUndo() {
+    if (!this._pendingUndo) return;
+    const { items, timer, toastEl } = this._pendingUndo;
+    clearTimeout(timer);
+    toastEl?.remove();
+    this._pendingUndo = null;
+    // _addItem preserves the [CATEGORY] prefix already in summary, so categories
+    // survive a restore. Position is lost; items reappear at the end.
+    for (const it of items) {
+      // Re-add active items normally. For previously-completed items, we still
+      // add them as active (most sensible default — user can re-check if needed).
+      this._addItem(it.summary);
     }
   }
 
@@ -971,6 +1115,12 @@ class GroupedShoppingListCard extends HTMLElement {
         padding: 2px 10px;
         min-width: 20px;
         text-align: center;
+      }
+      .sticky-top {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        background: var(--ha-card-background, var(--card-background-color, #fff));
       }
       .add-item-row {
         padding: 4px 16px 12px;
@@ -1075,6 +1225,7 @@ class GroupedShoppingListCard extends HTMLElement {
       }
       .item-row.pending .name {
         opacity: 0.55;
+        pointer-events: none;
       }
       .item-row.pending .checkbox,
       .item-row.pending .category-btn,
@@ -1121,6 +1272,27 @@ class GroupedShoppingListCard extends HTMLElement {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        cursor: text;
+      }
+      .item-row .name.completed {
+        cursor: default;
+      }
+      .item-row .name.name-edit {
+        cursor: text;
+        overflow: visible;
+        background: var(--secondary-background-color, rgba(0,0,0,0.04));
+        border: 1px solid var(--primary-color);
+        border-radius: 6px;
+        padding: 4px 8px;
+        margin: -5px -8px; /* offset padding so the row height doesn't jump */
+        outline: none;
+        font-family: inherit;
+        font-size: 14px;
+        line-height: 1.3;
+        color: var(--primary-text-color);
+        -webkit-appearance: none;
+        appearance: none;
+        box-shadow: 0 0 0 2px rgba(var(--rgb-primary-color, 3,169,244), 0.18);
       }
       .item-row .name.completed {
         text-decoration: line-through;
@@ -1435,6 +1607,59 @@ class GroupedShoppingListCard extends HTMLElement {
         padding: 2px 6px;
         border-radius: 4px;
       }
+      /* Undo toast */
+      @keyframes toastIn {
+        from { opacity: 0; transform: translate(-50%, 20px); }
+        to   { opacity: 1; transform: translate(-50%, 0); }
+      }
+      @keyframes toastOut {
+        from { opacity: 1; transform: translate(-50%, 0); }
+        to   { opacity: 0; transform: translate(-50%, 20px); }
+      }
+      .undo-toast {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 100;
+        background: var(--primary-text-color, #222);
+        color: var(--card-background-color, #fff);
+        padding: 10px 12px 10px 16px;
+        border-radius: 24px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 14px;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.22);
+        animation: toastIn 0.22s ease-out;
+        max-width: calc(100vw - 32px);
+      }
+      .undo-toast.hiding {
+        animation: toastOut 0.24s ease-in forwards;
+      }
+      .undo-toast .toast-msg {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+      .undo-toast .toast-btn {
+        flex-shrink: 0;
+        background: transparent;
+        border: 1px solid currentColor;
+        color: inherit;
+        padding: 4px 12px;
+        border-radius: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        text-transform: uppercase;
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        font-family: inherit;
+      }
+      .undo-toast .toast-btn:hover {
+        background: rgba(255,255,255,0.12);
+      }
     `;
     shadow.appendChild(style);
 
@@ -1602,15 +1827,22 @@ class GroupedShoppingListCard extends HTMLElement {
     catIndicator.className = 'categorizing-indicator';
     catIndicator.textContent = 'Categorizing...';
     addRow.appendChild(catIndicator);
-    card.appendChild(addRow);
 
-    // Autocomplete suggestions panel (flows below input)
+    // Sticky region: keeps the add bar (and live autocomplete) pinned while the
+    // items list scrolls underneath.
+    const stickyTop = document.createElement('div');
+    stickyTop.className = 'sticky-top';
+    stickyTop.appendChild(addRow);
+
+    // Autocomplete suggestions panel (flows below input, sticks with it)
     this._suggestionsPanel = document.createElement('div');
     this._suggestionsPanel.className = 'suggestions-panel';
     this._suggestionsPanel.hidden = true;
     // Don't let mousedown anywhere on the panel blur the input
     this._suggestionsPanel.addEventListener('mousedown', (e) => e.preventDefault());
-    card.appendChild(this._suggestionsPanel);
+    stickyTop.appendChild(this._suggestionsPanel);
+
+    card.appendChild(stickyTop);
 
     // Items container — diffed on updates, never torn down
     this._itemsContainer = document.createElement('div');
@@ -1844,6 +2076,15 @@ class GroupedShoppingListCard extends HTMLElement {
     const name = document.createElement('span');
     name.className = 'name' + (isCompleted ? ' completed' : '');
     name.textContent = item.displayName;
+    if (!isCompleted) {
+      name.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (row.dataset.editing === 'true') return;
+        const liveItem = this._items.find(i => i.uid === row._itemUid);
+        if (!liveItem || liveItem._pending || liveItem._pendingDelete) return;
+        this._startEditingRow(row, liveItem);
+      });
+    }
     row.appendChild(name);
 
     if (!isCompleted) {
@@ -1883,7 +2124,7 @@ class GroupedShoppingListCard extends HTMLElement {
     if (checkbox) checkbox.classList.toggle('checked', isCompleted);
 
     const name = row.querySelector('.name');
-    if (name) {
+    if (name && row.dataset.editing !== 'true') {
       name.textContent = item.displayName;
       name.classList.toggle('completed', isCompleted);
     }
@@ -2045,6 +2286,11 @@ class GroupedShoppingListCard extends HTMLElement {
     if (this._docClickHandler) {
       document.removeEventListener('click', this._docClickHandler, true);
       this._docClickHandler = null;
+    }
+    if (this._pendingUndo) {
+      clearTimeout(this._pendingUndo.timer);
+      this._pendingUndo.toastEl?.remove();
+      this._pendingUndo = null;
     }
   }
 
