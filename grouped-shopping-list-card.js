@@ -5,7 +5,7 @@
  * dismiss the keyboard on every hass update.
  */
 
-const CARD_VERSION = '1.1.1';
+const CARD_VERSION = '1.1.2';
 console.info(
   `%c GROUPED-SHOPPING-LIST-CARD %c v${CARD_VERSION} `,
   'color: white; background: #555; font-weight: bold; padding: 2px 4px;',
@@ -975,9 +975,14 @@ class GroupedShoppingListCard extends HTMLElement {
       .add-item-row {
         padding: 4px 16px 12px;
       }
+      .add-item-row .input-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
       .add-item-row .add-input {
-        display: block;
-        width: 100%;
+        flex: 1;
+        min-width: 0;
         box-sizing: border-box;
         padding: 10px 14px;
         font-size: 15px;
@@ -991,6 +996,34 @@ class GroupedShoppingListCard extends HTMLElement {
         transition: border-color 0.15s, box-shadow 0.15s;
         -webkit-appearance: none;
         appearance: none;
+      }
+      .add-item-row .add-btn {
+        flex-shrink: 0;
+        width: 40px;
+        height: 40px;
+        border: none;
+        border-radius: 10px;
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        transition: opacity 0.15s, transform 0.1s, background-color 0.15s;
+      }
+      .add-item-row .add-btn:hover { opacity: 0.92; }
+      .add-item-row .add-btn:active { transform: scale(0.96); }
+      .add-item-row .add-btn:disabled {
+        background: var(--divider-color, rgba(0,0,0,0.12));
+        color: var(--secondary-text-color);
+        cursor: default;
+        opacity: 0.7;
+      }
+      .add-item-row .add-btn svg {
+        width: 22px;
+        height: 22px;
+        fill: currentColor;
       }
       .add-item-row .add-input::placeholder {
         color: var(--secondary-text-color);
@@ -1488,6 +1521,7 @@ class GroupedShoppingListCard extends HTMLElement {
 
     this._addInput.addEventListener('input', () => {
       const val = this._addInput.value;
+      if (this._addBtn) this._addBtn.disabled = !val.trim();
       this._suggestions = this._computeSuggestions(val);
       this._selectedSuggestionIdx = -1;
       this._renderSuggestions();
@@ -1516,6 +1550,7 @@ class GroupedShoppingListCard extends HTMLElement {
         }
         if (val.trim()) {
           this._addInput.value = '';
+          if (this._addBtn) this._addBtn.disabled = true;
           this._clearSuggestions();
           this._addItem(val);
           this._addInput.focus();
@@ -1532,7 +1567,37 @@ class GroupedShoppingListCard extends HTMLElement {
         }
       }
     });
-    addRow.appendChild(this._addInput);
+    const inputWrap = document.createElement('div');
+    inputWrap.className = 'input-wrap';
+    inputWrap.appendChild(this._addInput);
+
+    this._addBtn = document.createElement('button');
+    this._addBtn.type = 'button';
+    this._addBtn.className = 'add-btn';
+    this._addBtn.title = 'Add item';
+    this._addBtn.setAttribute('aria-label', 'Add item');
+    this._addBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>';
+    this._addBtn.disabled = true;
+    // Preserve focus / iOS keyboard
+    this._addBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    this._addBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      let val = this._addInput.value;
+      if (this._selectedSuggestionIdx >= 0 && this._suggestions[this._selectedSuggestionIdx]) {
+        val = this._suggestions[this._selectedSuggestionIdx].name;
+      }
+      if (val.trim()) {
+        this._addInput.value = '';
+        this._clearSuggestions();
+        this._addItem(val);
+        this._addInput.focus();
+        this._addBtn.disabled = true;
+      }
+    });
+    inputWrap.appendChild(this._addBtn);
+
+    addRow.appendChild(inputWrap);
+
     const catIndicator = document.createElement('div');
     catIndicator.className = 'categorizing-indicator';
     catIndicator.textContent = 'Categorizing...';
