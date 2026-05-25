@@ -5,7 +5,7 @@
  * dismiss the keyboard on every hass update.
  */
 
-const CARD_VERSION = '1.1.0';
+const CARD_VERSION = '1.1.1';
 console.info(
   `%c GROUPED-SHOPPING-LIST-CARD %c v${CARD_VERSION} `,
   'color: white; background: #555; font-weight: bold; padding: 2px 4px;',
@@ -975,17 +975,33 @@ class GroupedShoppingListCard extends HTMLElement {
       .add-item-row {
         padding: 4px 16px 12px;
       }
-      .add-item-row ha-textfield {
+      .add-item-row .add-input {
         display: block;
         width: 100%;
-        --mdc-text-field-fill-color: var(--input-fill-color, var(--secondary-background-color, rgba(0,0,0,0.04)));
-        --mdc-text-field-idle-line-color: var(--divider-color, rgba(0,0,0,0.12));
-        --mdc-text-field-hover-line-color: var(--primary-color);
-        --mdc-text-field-ink-color: var(--primary-text-color);
-        --mdc-text-field-label-ink-color: var(--secondary-text-color);
-        --mdc-shape-small: 10px;
-        --mdc-typography-subtitle1-font-size: 14px;
-        --mdc-typography-subtitle1-font-family: inherit;
+        box-sizing: border-box;
+        padding: 10px 14px;
+        font-size: 15px;
+        font-family: inherit;
+        line-height: 1.3;
+        color: var(--primary-text-color);
+        background: var(--input-fill-color, var(--secondary-background-color, rgba(0,0,0,0.04)));
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.12));
+        border-radius: 10px;
+        outline: none;
+        transition: border-color 0.15s, box-shadow 0.15s;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .add-item-row .add-input::placeholder {
+        color: var(--secondary-text-color);
+        opacity: 0.7;
+      }
+      .add-item-row .add-input:hover {
+        border-color: var(--primary-color);
+      }
+      .add-item-row .add-input:focus {
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 2px rgba(var(--rgb-primary-color, 3,169,244), 0.18);
       }
       .category-header {
         display: flex;
@@ -1442,8 +1458,13 @@ class GroupedShoppingListCard extends HTMLElement {
     addRow.addEventListener('click', (e) => { e.stopPropagation(); });
     addRow.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
 
-    this._addInput = document.createElement('ha-textfield');
+    this._addInput = document.createElement('input');
+    this._addInput.type = 'text';
+    this._addInput.className = 'add-input';
     this._addInput.placeholder = '+ Add an item...';
+    this._addInput.autocomplete = 'off';
+    this._addInput.autocapitalize = 'sentences';
+    this._addInput.spellcheck = false;
 
     this._addInput.addEventListener('focus', () => {
       this._inputFocused = true;
